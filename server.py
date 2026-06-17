@@ -10,7 +10,10 @@ import time
 import socket
 import sys
 import os
+import threading
 from pathlib import Path
+import tkinter as tk
+from tkinter import ttk
 
 # Force unbuffered output so we see logs in real-time
 # (stdout is None when running as --windowed .exe)
@@ -151,8 +154,9 @@ class MirrorServer:
 
     def capture_frame(self) -> bytes | None:
         """Capture one frame from continuous capture, return JPEG bytes."""
-        # get_frame() returns latest frame from continuous capture thread
-        frame = self.camera.get_frame()
+        # dxcam's continuous capture API uses get_latest_frame()
+        # (NOT get_frame() — that was the v1.0.3 crash bug)
+        frame = self.camera.get_latest_frame()
         if frame is None:
             return None
 
