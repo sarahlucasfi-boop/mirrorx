@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0a0a">
+<title>MirrorX</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0b;
+    --surface: #141416;
+    --border: #222225;
+    --text: #e4e4e7;
+    --text-dim: #71717a;
+    --accent: #6366f1;
+    --accent-glow: rgba(99, 102, 241, 0.3);
+    --green: #22c55e;
+    --red: #ef4444;
+    --radius: 12px;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100dvh;
+    width: 100vw;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+  }
+
+  /* --- Connection Bar --- */
+  #connect-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #connect-bar input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    outline: none;
+    min-width: 0;
+  }
+  #connect-bar input:focus { border-color: var(--accent); }
+  #connect-bar button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity .15s;
+  }
+  #connect-bar button:active { opacity: 0.8; }
+  #connect-bar button.disconnect { background: var(--red); }
+
+  #status {
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  #status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--red);
+    display: inline-block;
+  }
+  #status-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  /* --- Canvas Area --- */
+  #canvas-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    position: relative;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    image-rendering: auto;
+  }
+
+  /* --- FPS Counter --- */
+  #fps {
+    position: absolute;
+    top: 8px; right: 8px;
+    background: rgba(0,0,0,0.7);
+    color: var(--green);
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    padding: 4px 8px;
+    border-radius: 6px;
+    pointer-events: none;
+  }
+
+  /* --- Toolbar --- */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    justify-content: center;
+  }
+  #toolbar button {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  #toolbar button:active { background: var(--accent); border-color: var(--accent); }
+  #toolbar button.active { background: var(--accent); border-color: var(--accent); }
+
+  /* --- Logo --- */
+  #logo {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+    opacity: 0.4;
+  }
+  #logo h1 {
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    background: linear-gradient(135deg, var(--accent), #a855f7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  #logo p { color: var(--text-dim); font-size: 14px; margin-top: 4px; }
+
+  /* --- Toast --- */
+  #toast {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity .3s;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- Connection Bar -->
+<div id="connect-bar">
+  <div id="status">
+    <span id="status-dot"></span>
+    <span id="status-text">Disconnected</span>
+  </div>
+  <input type="text" id="ip-input" placeholder="PC IP (e.g. 192.168.100.11)" value="192.168.100.11">
+  <button id="btn-connect" onclick="toggleConnection()">Connect</button>
+</div>
+
+<!-- Canvas -->
+<div id="canvas-wrap">
+  <canvas id="screen"></canvas>
+  <div id="logo">
+    <h1>MirrorX</h1>
+    <p>Connect to your PC to start mirroring</p>
+  </div>
+  <div id="fps" style="display:none">0 FPS</div>
+</div>
+
+<!-- Toolbar -->
+<div id="toolbar">
+  <button id="btn-mode" onclick="toggleMode()">Move</button>
+  <button onclick="sendKey('escape')">Esc</button>
+  <button onclick="sendKey('win')">Win</button>
+  <button onclick="sendKey('tab')">Tab</button>
+  <button onclick="sendKey('enter')">Enter</button>
+  <button onclick="sendKey('space')">Space</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// --- State ---
+let ws = null;
+let connected = false;
+let mode = 'move'; // 'move' | 'click' | 'draw'
+let screenInfo = null;
+let fps = 0;
+let frameCount = 0;
+let lastFpsTime = performance.now();
+
+// --- DOM ---
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+const logo = document.getElementById('logo');
+const fpsEl = document.getElementById('fps');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const btnConnect = document.getElementById('btn-connect');
+const btnMode = document.getElementById('btn-mode');
+const ipInput = document.getElementById('ip-input');
+const toast = document.getElementById('toast');
+
+// --- Toast ---
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+// --- Canvas Fit (aspect ratio) ---
+function fitCanvas() {
+  if (!screenInfo) return;
+  const wrap = document.getElementById('canvas-wrap');
+  const wrapW = wrap.clientWidth;
+  const wrapH = wrap.clientHeight;
+  const streamW = screenInfo.stream_width;
+  const streamH = screenInfo.stream_height;
+  const scale = Math.min(wrapW / streamW, wrapH / streamH);
+  canvas.style.width = Math.floor(streamW * scale) + 'px';
+  canvas.style.height = Math.floor(streamH * scale) + 'px';
+}
+
+// --- Connection ---
+function toggleConnection() {
+  if (connected) disconnect();
+  else connect();
+}
+
+async function connect() {
+  const ip = ipInput.value.trim() || '192.168.100.11';
+  const port = 9900;
+  const url = `ws://${ip}:${port}`;
+
+  statusText.textContent = 'Connecting...';
+  statusDot.className = '';
+
+  try {
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      connected = true;
+      statusDot.className = 'connected';
+      statusText.textContent = `Connected to ${ip}`;
+      btnConnect.textContent = 'Disconnect';
+      btnConnect.classList.add('disconnect');
+      logo.style.display = 'none';
+      fpsEl.style.display = 'block';
+      showToast('Connected');
+    };
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'screen_info') {
+            screenInfo = msg;
+            canvas.width = msg.stream_width;
+            canvas.height = msg.stream_height;
+            fitCanvas();
+            console.log('Screen info:', msg);
+          }
+        } catch(e) {}
+        return;
+      }
+
+      // Binary frame: 1-byte type + 4-byte length + JPEG
+      const data = new Uint8Array(event.data);
+      const msgType = data[0];
+      const view = new DataView(event.data);
+      const length = view.getUint32(1, false);
+
+      if (msgType === 0) {
+        const jpeg = data.slice(5, 5 + length);
+        const blob = new Blob([jpeg], { type: 'image/jpeg' });
+        // createImageBitmap is hardware-accelerated and avoids GC pressure
+        createImageBitmap(blob).then(bmp => {
+          ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+          bmp.close();
+          frameCount++;
+        });
+      }
+    };
+ 
+    // Resize canvas on window resize
+    window.addEventListener('resize', () => { if (connected) fitCanvas(); });
+
+    ws.onclose = () => {
+      connected = false;
+      statusDot.className = '';
+      statusText.textContent = 'Disconnected';
+      btnConnect.textContent = 'Connect';
+      btnConnect.classList.remove('disconnect');
+      logo.style.display = 'block';
+      fpsEl.style.display = 'none';
+      showToast('Disconnected');
+    };
+
+    ws.onerror = () => {
+      showToast('Connection failed');
+    };
+
+  } catch(e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+function disconnect() {
+  if (ws) ws.close();
+  ws = null;
+}
+
+// --- Touch Handling ---
+function getTouchPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = (screenInfo?.stream_width || canvas.width) / rect.width;
+  const scaleY = (screenInfo?.stream_height || canvas.height) / rect.height;
+  const touch = e.touches[0] || e.changedTouches[0];
+  if (!touch) return null;
+
+  return {
+    x: Math.min(1, Math.max(0, (touch.clientX - rect.left) * scaleX / (screenInfo?.stream_width || canvas.width))),
+    y: Math.min(1, Math.max(0, (touch.clientY - rect.top) * scaleY / (screenInfo?.stream_height || canvas.height))),
+  };
+}
+
+function sendTouch(x, y, action) {
+  if (!ws || !connected) return;
+  ws.send(JSON.stringify({ type: 'touch', x, y, action }));
+}
+
+function sendKey(key) {
+  if (!ws || !connected) return;
+  showToast('Key: ' + key);
+  // Send keyboard action via touch protocol
+  ws.send(JSON.stringify({ type: 'touch', action: 'key', key }));
+}
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const pos = getTouchPos(e);
+  if (!pos) return;
+  if (mode === 'click') {
+    sendTouch(pos.x, pos.y, 'down');
+  } else if (mode === 'draw') {
+    sendTouch(pos.x, pos.y, 'down');
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const pos = getTouchPos(e);
+  if (!pos) return;
+  if (mode === 'move') {
+    sendTouch(pos.x, pos.y, 'move');
+  } else if (mode === 'draw' || mode === 'click') {
+    sendTouch(pos.x, pos.y, 'drag');
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  const pos = getTouchPos(e);
+  if (!pos) return;
+  if (mode === 'click') {
+    sendTouch(pos.x, pos.y, 'click');
+  } else {
+    sendTouch(pos.x, pos.y, 'up');
+  }
+}, { passive: false });
+
+// --- Mouse fallback (for desktop testing) ---
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+  sendTouch(x, y, 'down');
+});
+canvas.addEventListener('mousemove', (e) => {
+  if (!e.buttons) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+  sendTouch(x, y, 'drag');
+});
+canvas.addEventListener('mouseup', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+  sendTouch(x, y, 'click');
+});
+
+// --- Mode Toggle ---
+function toggleMode() {
+  const modes = ['move', 'click', 'draw'];
+  const idx = modes.indexOf(mode);
+  mode = modes[(idx + 1) % modes.length];
+  btnMode.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+  showToast('Mode: ' + mode);
+}
+
+// --- FPS Counter ---
+setInterval(() => {
+  const now = performance.now();
+  const elapsed = (now - lastFpsTime) / 1000;
+  fps = Math.round(frameCount / elapsed);
+  frameCount = 0;
+  lastFpsTime = now;
+  if (connected) {
+    fpsEl.textContent = fps + ' FPS';
+    fpsEl.style.color = fps > 25 ? '#22c55e' : fps > 15 ? '#eab308' : '#ef4444';
+  }
+}, 1000);
+
+// --- Keyboard shortcuts on tablet ---
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') disconnect();
+});
+</script>
+</body>
+</html>

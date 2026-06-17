@@ -1,0 +1,88 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                    MIRRORX — HISTÓRICO DE VERSÕES               ║
+║           PC ↔ Tablet via WiFi • Peer-to-Peer • Open Source      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════
+v1.0.0 — 16/06/2026
+═══════════════════════════════════════════════════════════════════
+  Lançamento inicial — Display Only
+
+  Funcionalidades:
+    ✅ Servidor PC com captura de tela via DXGI (dxcam)
+    ✅ Streaming WebSocket binário (JPEG) a 30 FPS
+    ✅ APK Android nativo (Kotlin + Jetpack Compose)
+    ✅ Cliente web HTML5 (alternativa sem instalar)
+    ✅ Barra de conexão com IP configurável
+    ✅ Contador de FPS em tempo real
+    ✅ Tema dark profissional (#0A0A0B + #6366F1)
+    ✅ Qualidade dinâmica auto-ajustável
+    ✅ Escala configurável (25% a 100%)
+    ✅ Touch input (código pronto, desativado)
+    ✅ Teclas de atalho (Esc, Win, Tab, Enter, Space)
+    ✅ Ícone do aplicativo (.ico + mipmap Android)
+    ✅ Aspect ratio preservado (letterbox)
+
+  Otimizações de performance:
+    ✅ JPEG encoding via OpenCV (cv2.imencode) — 5-10x mais rápido
+    ✅ Resize via cv2.resize (INTER_AREA) — mais rápido que Pillow
+    ✅ Huffman optimization desativada (encode mais rápido)
+    ✅ createImageBitmap() no cliente (hardware-accelerated)
+    ✅ Qualidade dinâmica baseada em FPS
+
+  Arquivos:
+    - MirrorX.exe (Windows, ~72 MB)
+    - MirrorX_v1.0.apk (Android, ~5.5 MB, assinado)
+    - server.py (fonte Python)
+    - client/index.html (cliente web)
+    - landing.html (GitHub Pages)
+
+═══════════════════════════════════════════════════════════════════
+v1.1.0 — PLANEJADO
+═══════════════════════════════════════════════════════════════════
+  Touch Input
+
+  Planejado:
+    ⬜ Ativar TouchHandler.kt (código já pronto)
+    ⬜ Modos: Move / Click / Draw
+    ⬜ Barra de ferramentas com teclas de atalho
+    ⬜ Reconexão automática
+    ⬜ Suporte a gestos (pinch-to-zoom, scroll)
+
+═══════════════════════════════════════════════════════════════════
+v1.2.0 — PLANEJADO
+═══════════════════════════════════════════════════════════════════
+  Driver Virtual + 60 FPS
+
+  Planejado:
+    ⬜ Driver virtual de vídeo (monitor extra real no Windows)
+    ⬜ 60 FPS (otimização de pipeline)
+    ⬜ Stylus pressure sensitivity
+    ⬜ Multi-monitor (selecionar qual monitor espelhar)
+    ⬜ H.264 via NVENC (hardware encoding)
+
+═══════════════════════════════════════════════════════════════════
+v1.3.0 — PLANEJADO
+═══════════════════════════════════════════════════════════════════
+  Premium + Distribuição
+
+  Planejado:
+    ⬜ Conexão USB (menor latência)
+    ⬜ Sistema de licença Premium (chave de ativação)
+    ⬜ Sign do APK (Google Play)
+    ⬜ Code signing do .exe (certificado EV)
+    ⬜ Atualizações automáticas
+
+═══════════════════════════════════════════════════════════════════
+NOTAS DE RELEASE
+═══════════════════════════════════════════════════════════════════
+
+v1.0.0:
+  - Free tier: 30 FPS, touch básico, single monitor, open source
+  - Premium tier (R$22 vitalício): recursos futuros (v1.2+)
+  - Distribuição: GitHub Releases (.exe + .apk)
+  - Landing page: GitHub Pages
+
+═══════════════════════════════════════════════════════════════════
+Última atualização: 16/06/2026 23:30
+═══════════════════════════════════════════════════════════════════
