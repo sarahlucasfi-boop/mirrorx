@@ -1,9 +1,12 @@
 """
-MirrorX v1.0.5 — PC Screen Mirroring to Tablet
+MirrorX v1.2.1 — PC Screen Mirroring to Tablet
 Captures screen via DXGI, streams via WebSocket, receives touch input.
 
-v1.0.5 changes:
-  - Interactive Tkinter control panel (FPS, quality, scale, live stats)
+v1.2.1 changes:
+  - Fixed: panel title and version display now show v1.2.1
+  - Fixed: top bar in APK no longer auto-hides when only touch is enabled
+            (only auto-hides in Monitor Mode now)
+  - Cursor size TINY/MICRO added for ultra-small overlay
   - Mouse cursor tracking — position is sent with each frame so the
     tablet can overlay a cursor on the captured image
   - Frame format: type(1) + jpeg_len(4) + mouse_x(2) + mouse_y(2) + jpeg
@@ -142,7 +145,7 @@ class ControlPanel:
         self.server = server
 
         self.root = tk.Tk()
-        self.root.title("MirrorX v1.0.5 — Painel de Controle")
+        self.root.title("MirrorX v1.2.1 — Painel de Controle")
         self.root.geometry("440x620")
         self.root.configure(bg="#0A0A0B")
         self.root.minsize(420, 580)
@@ -193,7 +196,7 @@ class ControlPanel:
         # Title
         tk.Label(outer, text="MirrorX", font=("Segoe UI", 22, "bold"),
                  fg=ACCENT, bg=BG).pack(anchor=tk.W)
-        tk.Label(outer, text="v1.0.5 — Painel interativo", font=("Segoe UI", 10),
+        tk.Label(outer, text="v1.2.1 — Monitor mode + stylus", font=("Segoe UI", 10),
                  fg=DIM, bg=BG).pack(anchor=tk.W, pady=(0, 12))
 
         # --- Network card ---
@@ -620,7 +623,7 @@ class MirrorServer:
                 "stream_width": self.stream_w,
                 "stream_height": self.stream_h,
                 "aspect_ratio": self.screen_w / self.screen_h,
-                "version": "1.2.0",
+                "version": "1.2.1",
             }))
         except Exception as e:
             log(f"[MirrorX] Failed to send screen_info: {e}")
@@ -790,7 +793,7 @@ def run_server_in_thread(settings, mouse, ready_event, server_holder):
 
 
 def main():
-    log("[MirrorX] v1.0.5 starting...")
+    log("[MirrorX] v1.2.1 starting...")
     log(f"[MirrorX] Python: {sys.version}")
 
     settings = Settings()
