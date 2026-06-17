@@ -395,6 +395,9 @@ class MirrorServer:
         # FPS tracking
         self.sent_frame_count = 0
         self.bytes_sent = 0
+        # Lifetime accumulators (never reset) for accurate KB/frame stat
+        self.total_frames = 0
+        self.total_bytes = 0
         self.last_fps_time = time.monotonic()
         self.current_fps = 0.0
 
@@ -406,9 +409,9 @@ class MirrorServer:
     def stats(self) -> dict:
         with self.mouse._lock:
             mx, my = self.mouse._x, self.mouse._y
-        elapsed = max(time.monotonic() - self.last_fps_time, 0.001)
-        avg_frame_kb = (self.bytes_sent / 1024) / max(self.sent_frame_count, 1) if self.sent_frame_count else 0
-        # Reset sent_frame_count? No, let it accumulate over the 1s window
+        # KB/frame uses lifetime accumulators so the average is correct
+        # regardless of the 1s/3s reset windows.
+        avg_frame_kb = (self.total_bytes / 1024) / max(self.total_frames, 1) if self.total_frames else 0
         return {
             "local_ip": getattr(self, "_local_ip", "?"),
             "fps": self.current_fps,
@@ -654,6 +657,8 @@ class MirrorServer:
             frame_msg = header + jpeg_bytes
             self.sent_frame_count += 1
             self.bytes_sent += len(jpeg_bytes)
+            self.total_frames += 1
+            self.total_bytes += len(jpeg_bytes)
 
             for client in list(self.clients):
                 asyncio.ensure_future(self._send_to_client(client, frame_msg))
@@ -664,9 +669,10 @@ class MirrorServer:
                 self.sent_frame_count = 0
                 self.last_fps_time = now
                 if now - last_fps_log >= 3.0:
+                    avg_kb = (self.total_bytes / 1024) / max(self.total_frames, 1) if self.total_frames else 0
                     log(f"[MirrorX] FPS: {self.current_fps:.0f} | Q: {self.settings.get('quality')}% | "
                         f"S: {self.settings.get('scale')*100:.0f}% | "
-                        f"Frame: {self.bytes_sent/1024/max(self.sent_frame_count,1):.0f}KB avg | "
+                        f"Frame: {avg_kb:.0f}KB avg | "
                         f"Clients: {len(self.clients)}")
                     self.bytes_sent = 0
                     last_fps_log = now
