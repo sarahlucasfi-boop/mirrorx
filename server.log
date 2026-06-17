@@ -1,0 +1,12 @@
+[MirrorX] v1.0.3 starting...
+[MirrorX] Python: 3.11.15 (main, Jun 11 2026, 04:59:07) [MSC v.1944 64 bit (AMD64)]
+[MirrorX] HTTP server on http://0.0.0.0:8080
+[MirrorX] WebSocket server listening on :9900
+[MirrorX] Screen: 1920x1080
+[MirrorX] Streaming at: 1440x810 (75%)
+[MirrorX] Quality: 75%
+[MirrorX] Capture: continuous mode (target 30 FPS)
+[MirrorX] Server started on 192.168.100.11
+[MirrorX] Tablet: open http://192.168.100.11:8080 in Chrome
+[MirrorX] Dynamic quality: ON (target 30 FPS)
+[MirrorX] Waiting for client...
