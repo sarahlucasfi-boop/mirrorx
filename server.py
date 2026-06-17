@@ -13,8 +13,11 @@ import os
 from pathlib import Path
 
 # Force unbuffered output so we see logs in real-time
-sys.stdout.reconfigure(line_buffering=True)
-sys.stderr.reconfigure(line_buffering=True)
+# (stdout is None when running as --windowed .exe)
+if sys.stdout is not None:
+    sys.stdout.reconfigure(line_buffering=True)
+if sys.stderr is not None:
+    sys.stderr.reconfigure(line_buffering=True)
 
 import dxcam
 import cv2
@@ -48,8 +51,11 @@ pyautogui.FAILSAFE = False
 
 
 def log(msg):
-    """Print with immediate flush."""
-    print(msg, flush=True)
+    """Print with immediate flush (safe for --windowed exe)."""
+    try:
+        print(msg, flush=True)
+    except Exception:
+        pass
 
 
 class MirrorServer:
