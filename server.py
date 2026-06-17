@@ -19,12 +19,12 @@ import pyautogui
 # --- Config ---
 PORT = 9900
 HTTP_PORT = 8080
-BASE_QUALITY = 60          # Starting JPEG quality (lower = faster)
+BASE_QUALITY = 75          # Starting JPEG quality — higher for text readability
 MIN_QUALITY = 25           # Minimum quality floor
-MAX_QUALITY = 80           # Maximum quality ceiling
+MAX_QUALITY = 85           # Maximum quality ceiling
 TARGET_FPS = 30
 FRAME_TIME = 1.0 / TARGET_FPS
-SCALE_FACTOR = 0.5         # Downscale for bandwidth (1.0 = native)
+SCALE_FACTOR = 0.75        # 75% — preserves text legibility
 MIN_SCALE = 0.25           # Minimum downscale
 JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, BASE_QUALITY,
                cv2.IMWRITE_JPEG_OPTIMIZE, 0,      # No Huffman opt = faster
@@ -63,8 +63,11 @@ class MirrorServer:
         self._resize_target = None
         # Cached JPEG encode params
         self._jpeg_params = list(JPEG_PARAMS)
-        # Frame skip counter for slow clients
-        self._frame_skip = {}
+        # Latest-frame buffer (solution 4: drop old frames)
+        self.latest_frame: bytes | None = None
+        self.latest_frame_ready = asyncio.Event()
+        # Per-client send lock (solution 5: non-blocking broadcast)
+        self._sending: set = set()
 
     def get_local_ip(self) -> str:
         """Get the local network IP for the tablet to connect to."""
@@ -268,8 +271,20 @@ class MirrorServer:
             self.clients.discard(websocket)
             print(f"[MirrorX] Client disconnected: {remote}")
 
+    async def _send_to_client(self, client, frame_msg):
+        """Send frame to one client. Skip if still sending previous frame."""
+        if client in self._sending:
+            return  # Solution 5: drop frame for slow client
+        self._sending.add(client)
+        try:
+            await client.send(frame_msg)
+        except websockets.exceptions.ConnectionClosed:
+            self.clients.discard(client)
+        finally:
+            self._sending.discard(client)
+
     async def stream_loop(self):
-        """Main capture and broadcast loop with FPS tracking."""
+        """Main capture and broadcast loop — latest-frame buffer pattern."""
         self.start_capture()
         self.running = True
         print(f"[MirrorX] Server started on {self.get_local_ip()}")
@@ -300,22 +315,18 @@ class MirrorServer:
                 await asyncio.sleep(0.5)
                 continue
 
-            # Capture frame
+            # Capture frame (solution 4: latest-frame buffer)
             jpeg_bytes = self.capture_frame()
             if jpeg_bytes is None:
                 continue
 
-            # Broadcast to all clients
+            # Store latest frame (old frame is automatically dropped)
+            self.latest_frame = jpeg_bytes
             frame_msg = struct.pack('>BI', 0, len(jpeg_bytes)) + jpeg_bytes
 
-            disconnected = set()
-            for client in self.clients:
-                try:
-                    await client.send(frame_msg)
-                except websockets.exceptions.ConnectionClosed:
-                    disconnected.add(client)
-
-            self.clients -= disconnected
+            # Solution 5: fire-and-forget sends (non-blocking broadcast)
+            for client in list(self.clients):
+                asyncio.ensure_future(self._send_to_client(client, frame_msg))
 
     async def run(self):
         """Start the WebSocket server."""

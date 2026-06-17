@@ -105,6 +105,12 @@
     display: block;
     image-rendering: auto;
   }
+  /* Solution 3: sharp pixel rendering when upscaled */
+  canvas.upscaled {
+    image-rendering: -webkit-crisp-edges;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+  }
 
   /* --- FPS Counter --- */
   #fps {
@@ -254,8 +260,16 @@ function fitCanvas() {
   const streamW = screenInfo.stream_width;
   const streamH = screenInfo.stream_height;
   const scale = Math.min(wrapW / streamW, wrapH / streamH);
-  canvas.style.width = Math.floor(streamW * scale) + 'px';
-  canvas.style.height = Math.floor(streamH * scale) + 'px';
+  const displayW = Math.floor(streamW * scale);
+  const displayH = Math.floor(streamH * scale);
+  canvas.style.width = displayW + 'px';
+  canvas.style.height = displayH + 'px';
+  // Solution 3: enable pixelated rendering when upscaled (scale > 1.5x)
+  if (scale > 1.5) {
+    canvas.classList.add('upscaled');
+  } else {
+    canvas.classList.remove('upscaled');
+  }
 }
 
 // --- Connection ---
