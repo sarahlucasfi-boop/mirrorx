@@ -76,6 +76,10 @@ class Settings:
         self.auto_adjust = True
         self.low_fps_threshold = 20
         self.high_fps_threshold = 28
+        # v1.2 additions
+        self.strict_pen = False          # reject non-stylus touch events
+        self.cursor_during_pen = True     # show PC cursor while writing
+        self.target_tablet_fps = 60       # tablet display target (60/120Hz)
 
     def get(self, key):
         with self._lock:
@@ -99,12 +103,15 @@ class MouseTracker:
        - touch handler (active, on every tablet touch)
 
     Read by the capture loop to include position in each frame header.
+    Also tracks whether the cursor should be visible on the tablet
+    (set by APK when stylus is active).
     """
 
     def __init__(self):
         self._x = 0
         self._y = 0
         self._lock = threading.Lock()
+        self._cursor_visible = True
 
     def set(self, x: int, y: int):
         with self._lock:
@@ -113,6 +120,14 @@ class MouseTracker:
     def get(self) -> tuple[int, int]:
         with self._lock:
             return (self._x, self._y)
+
+    def set_cursor_visible(self, visible: bool):
+        with self._lock:
+            self._cursor_visible = visible
+
+    def is_cursor_visible(self) -> bool:
+        with self._lock:
+            return self._cursor_visible
 
 
 # --- Tkinter control panel ---
@@ -243,6 +258,12 @@ class ControlPanel:
                         variable=self.auto_var, command=self._on_auto_change,
                         style="TCheckbutton").pack(anchor=tk.W, pady=(4, 0))
 
+        # v1.2 toggles
+        self.strict_pen_var = tk.BooleanVar(value=self.settings.strict_pen)
+        ttk.Checkbutton(stream, text="Modo Caneta Estrito (ignora dedos)",
+                        variable=self.strict_pen_var, command=self._on_strict_pen_change,
+                        style="TCheckbutton").pack(anchor=tk.W, pady=(2, 0))
+
         # --- Live stats card ---
         self._card(outer, "Status em tempo real").pack(fill=tk.X, pady=(0, 10))
         stats = self._card_body(outer.winfo_children()[-1])
@@ -324,6 +345,10 @@ class ControlPanel:
     def _on_auto_change(self):
         self.settings.auto_adjust = self.auto_var.get()
         log(f"[MirrorX] [panel] Auto-ajuste -> {'ON' if self.settings.auto_adjust else 'OFF'}")
+
+    def _on_strict_pen_change(self):
+        self.settings.strict_pen = self.strict_pen_var.get()
+        log(f"[MirrorX] [panel] Modo Caneta Estrito -> {'ON' if self.settings.strict_pen else 'OFF'}")
 
     def _on_close(self):
         log("[MirrorX] Painel fechado — parando servidor")
@@ -511,24 +536,51 @@ class MirrorServer:
             log(f"[MirrorX] Key error: {key} -> {e}")
 
     def handle_touch(self, data: dict):
+        """Convert tablet touch to Windows mouse events. v1.2 supports
+        stylus pressure, tilt, tool type, and button mapping."""
         try:
             x_ratio = data.get("x", 0.5)
             y_ratio = data.get("y", 0.5)
             action = data.get("action", "move")
+            pressure = float(data.get("pressure", 0.5))
+            tilt = float(data.get("tilt", 0.0))
+            tool = data.get("tool", "finger")        # finger/stylus/mouse/eraser
+            buttons = int(data.get("buttons", 0))    # 1=primary, 2=secondary, 4=tertiary
+
+            # Strict-pen mode: ignore non-stylus touch events
+            if self.settings.strict_pen and tool not in ("stylus", "eraser"):
+                return
+
             target_x = int(x_ratio * self.screen_w)
             target_y = int(y_ratio * self.screen_h)
 
             # Update mouse cache (so next frame's cursor overlay is correct)
             self.mouse.set(target_x, target_y)
 
+            # Determine which mouse button (stylus tip = primary, barrel = secondary)
+            # If the touch event specifies buttons, honor it; else default to primary
+            button = "left"
+            if action in ("right_click",) or (buttons & 2):
+                button = "right"
+            elif buttons & 4:
+                button = "middle"
+
+            # Log stylus events with pressure (useful for debugging note-taking apps)
+            if tool in ("stylus", "eraser") and action in ("down", "move", "drag"):
+                if not hasattr(self, '_last_stylus_log') or \
+                   (time.monotonic() - self._last_stylus_log) > 1.0:
+                    log(f"[MirrorX] Stylus {action} @ ({target_x},{target_y}) "
+                        f"p={pressure:.2f} tilt={tilt:.0f}°")
+                    self._last_stylus_log = time.monotonic()
+
             if action == "down":
                 pyautogui.moveTo(target_x, target_y)
-                pyautogui.mouseDown()
+                pyautogui.mouseDown(button=button)
             elif action == "up":
                 pyautogui.moveTo(target_x, target_y)
-                pyautogui.mouseUp()
+                pyautogui.mouseUp(button=button)
             elif action == "click":
-                pyautogui.click(target_x, target_y)
+                pyautogui.click(target_x, target_y, button=button)
             elif action == "right_click":
                 pyautogui.rightClick(target_x, target_y)
             elif action == "move":
@@ -537,7 +589,10 @@ class MirrorServer:
                 amount = data.get("amount", 0)
                 pyautogui.scroll(amount)
             elif action == "drag":
-                pyautogui.dragTo(target_x, target_y, duration=0.05)
+                # Slight duration for stylus drag (smoother ink)
+                dur = 0.02 if tool == "stylus" else 0.05
+                pyautogui.dragTo(target_x, target_y, duration=dur,
+                                button=button)
             elif action == "key":
                 key = data.get("key", "")
                 self._handle_key(key)
@@ -565,7 +620,7 @@ class MirrorServer:
                 "stream_width": self.stream_w,
                 "stream_height": self.stream_h,
                 "aspect_ratio": self.screen_w / self.screen_h,
-                "version": "1.0.5",
+                "version": "1.2.0",
             }))
         except Exception as e:
             log(f"[MirrorX] Failed to send screen_info: {e}")
@@ -582,6 +637,9 @@ class MirrorServer:
                         await websocket.send(json.dumps({"type": "pong"}))
                     elif msg_type == "config":
                         self.handle_config(data)
+                    elif msg_type == "cursor":
+                        # v1.2: APK tells server whether to render cursor
+                        self.mouse.set_cursor_visible(bool(data.get("visible", True)))
                 except json.JSONDecodeError:
                     pass
         except websockets.exceptions.ConnectionClosed:
@@ -652,8 +710,14 @@ class MirrorServer:
                 px, py = self.mouse.get()
             mx, my = self.mouse.get()
 
-            # Frame header: type(1) + jpeg_len(4) + mouse_x(2) + mouse_y(2)
-            header = struct.pack('>B I H H', 0, len(jpeg_bytes), mx, my)
+            # v1.2 frame header (11 bytes):
+            #   type(1) + jpeg_len(4) + mouse_x(2) + mouse_y(2) +
+            #   cursor_visible(1) + reserved(1) + jpeg
+            # cursor_visible is driven by MouseTracker — APK can request
+            # hiding via {"type": "cursor", "visible": false}.
+            cursor_visible = 1 if (self.mouse.is_cursor_visible() and (mx > 0 or my > 0)) else 0
+            header = struct.pack('>B I H H B B', 0, len(jpeg_bytes), mx, my,
+                                 cursor_visible, 0)
             frame_msg = header + jpeg_bytes
             self.sent_frame_count += 1
             self.bytes_sent += len(jpeg_bytes)
