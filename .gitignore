@@ -9,3 +9,6 @@ build/
 venv/
 .env
 *.egg-info/
+# Large files excluded from Git
+android_source/gradle-8.5/
+android_source/gradle-8.5-bin.zip
