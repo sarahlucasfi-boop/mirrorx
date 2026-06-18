@@ -175,7 +175,7 @@ class ControlPanel:
         port: int,
         host: str,
         on_stop: Callable[[], None],
-        version: str = "1.6.0",
+        version: str = "1.6.4",
     ):
         self.mode = mode            # "mirror" or "hermes"
         self.server = server_obj
