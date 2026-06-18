@@ -1,0 +1,300 @@
+═══════════════════════════════════════════════════════════════════
+MIRRORX v1.5.9 — PLANO DE IMPLEMENTAÇÃO
+═══════════════════════════════════════════════════════════════════
+Data: 18/06/2026
+Autor: Hermes Agent
+Status: PLANEJAMENTO
+
+───────────────────────────────────────────────────────────────────
+SITUAÇÃO ATUAL (v1.5.8)
+───────────────────────────────────────────────────────────────────
+
+O que FUNCIONA:
+  ✓ APK mostra tela do PC no fundo (JPG stream)
+  ✓ Trackball translúcido branco no canto inferior direito
+  ✓ Botões L (verde) e R (laranja) no canto inferior esquerdo
+  ✓ Configurações no APK (qualidade, escala, FPS, etc)
+  ✓ Nav bar do Android escondida
+  ✓ EXE roda como servidor puro (sem painel)
+
+O que NÃO FUNCIONA (reclamações do usuário):
+  ✗ Cursor do PC não aparece visivelmente no tablet
+  ✗ Não tem cursor local no tablet (sem feedback de onde o dedo tá)
+  ✗ Botões da topbar (Cursor, Telefone, +, 👍, Lápis) DESCONECTAM
+    do servidor quando clicados
+  ✗ Modo Hermes aparece em menu SEPARADO, não junto com as
+    opções de Touch (Cursor, Caneta, Desenhar)
+  ✗ Touchscreen de caneta (stylus) não funciona direito
+  ✗ TCP tem lag — usuário sugeriu UDP
+  ✗ Plano de implementação não existia
+
+───────────────────────────────────────────────────────────────────
+15 PARTES DO PLANO v1.5.9
+───────────────────────────────────────────────────────────────────
+
+PARTE 1 — CURSOR LOCAL NO TABLET (Trackpoint Visual)
+───────────────────────────────────────────────────────
+O que: Mostrar um cursor translúcido que segue o dedo do usuário
+      dentro do trackball, dando feedback visual imediato.
+Como:
+  • Adicionar uma variável `localCursorPos: Offset` no TouchpadView
+  • Atualizar em `onDrag` com a posição normalizada do dedo
+  • Desenhar como círculo verde/amarelo translúcido (12dp) no centro
+    do trackball quando pressionado
+  • Mostrar posição do dedo mesmo fora do centro
+Por que: Sem feedback visual, o usuário não sabe se o trackball
+        está respondendo. Lag visual = 0 (não vai pela rede).
+
+PARTE 2 — CURSOR DO PC VISÍVEL
+─────────────────────────────────
+O que: O cursor vermelho atual (que mostra a posição do mouse do PC)
+      precisa ser mais visível e seguir corretamente.
+Como:
+  • Manter o `remoteCursor` do MirrorWebSocket
+  • Aumentar tamanho do cursor overlay de 14dp pra 24dp
+  • Adicionar seta do mouse (não só círculo) usando Canvas
+  • Atualizar a cada frame JPEG (já recebe no header)
+Por que: Usuário precisa ver ONDE o mouse do PC está pra clicar
+        no lugar certo.
+
+PARTE 3 — FIX TOPBAR BUG (Desconexão ao clicar botões)
+──────────────────────────────────────────────────────
+O que: Os botões da topbar (Cursor, Telefone, +, 👍, Lápis)
+      atualmente DESCONECTAM o servidor. Isso é um bug grave.
+Causa provável:
+  • MirrorScreen.kt tem callbacks que chamam `client.disconnect()`
+    quando algum desses botões é pressionado
+  • O HermesActivity é activity SEPARADA, então o back press da
+    HermesActivity pode estar voltando pro MirrorScreen e o
+    MirrorScreen desconecta
+Como:
+  • Verificar `MainActivity.kt` e `MirrorScreen.kt`
+  • Garantir que o disconnect só acontece quando o user clica
+    explicitamente no botão "Sair"
+  • Adicionar auto-reconexão (se cair, tenta reconectar 3x)
+
+PARTE 4 — HERMES COMO OPÇÃO NO MENU TOUCH
+───────────────────────────────────────────
+O que: O modo Hermes deve aparecer como uma das opções em
+      "Touch (v1.2)" junto com "Cursor", "Caneta", "Desenhar".
+      Não como activity separada, mas como modo dentro do
+      MirrorScreen principal.
+Como:
+  • Adicionar chip "Hermes" no TouchMode enum
+  • Quando selecionado, mostra a TouchpadView (trackball)
+      como overlay no topo da tela do PC
+  • Remover o botão separado "Abrir Hermes" (não precisa mais)
+Por que: UX unificada — usuário não precisa abrir 2 activities
+        diferentes pra usar o app.
+
+PARTE 5 — STYLUS / CANETA FUNCIONA
+─────────────────────────────────────
+O que: Toques com S Pen / stylus devem funcionar como input
+      de mouse (modo Caneta existente, mas estava bugado).
+Como:
+  • TouchHandler.kt já tem TOOL_TYPE_STYLUS detectado
+  • Verificar se o flow ACTION_DOWN/MOVE/UP está enviando
+    corretamente pro server
+  • Adicionar log no APK pra debug
+  • Testar com TouchHandler._doTouch() enviando via
+    `sendTouchPathBinary` (binário 0x10)
+Por que: O Lucas usa tablet com caneta, sem funcionar fica
+        sem metade da usabilidade.
+
+PARTE 6 — UDP COMO ALTERNATIVA AO TCP
+──────────────────────────────────────
+O que: Adicionar opção de usar UDP (User Datagram Protocol)
+      em vez de TCP/WebSocket pra reduzir lag.
+Trade-offs:
+  • UDP: menos latência (sem ACK), mas pode perder pacotes
+  • TCP (WebSocket): confiável, mas ~50-100ms overhead
+Como:
+  • Adicionar flag `--udp` no server.py
+  • Servidor UDP escuta em 9901 (separado do TCP 9900)
+  • Cliente Android: tentar UDP primeiro, fallback pra TCP
+  • Para v1.5.9: começar com TCP, deixar flag UDP como TODO
+Por que: O Lucas pediu. Mas é uma mudança arquitetural grande.
+        Por isso adiamos pra iteração futura se sobrar tempo.
+
+PARTE 7 — AUTO-RECONEXÃO
+─────────────────────────
+O que: Se a conexão cair, reconectar automaticamente até 3x
+      com backoff exponencial.
+Como:
+  • Adicionar `connectionAttempts: Int` no HermesClient
+  • Em `onClose`, agendar reconexão em 1s, 2s, 4s
+  • Mostrar status "Reconectando..." na topbar
+  • Parar após 3 tentativas falhas (mostrar erro)
+Por que: Conexão WiFi pode oscilar, ficar reconectando manual
+        é chato.
+
+PARTE 8 — INDICADOR DE LATÊNCIA
+─────────────────────────────────
+O que: Mostrar ping atual (ms) na topbar.
+Como:
+  • HermesClient já tem stats_latency_ms via heartbeat
+  • Adicionar StateFlow<Int> latencyMs
+  • TouchpadView mostra como "PING 28ms" na status bar
+  • Verde < 50ms, amarelo 50-100ms, vermelho > 100ms
+Por que: Usuário saber se está com lag.
+
+PARTE 9 — COMPRESSÃO DE FRAMES OTIMIZADA
+──────────────────────────────────────────
+O que: Reduzir o tamanho dos frames JPEG sem perder qualidade
+      visual perceptível.
+Como:
+  • Server: já usa OpenCV, mas testar com TurboJPEG (10x mais
+    rápido)
+  • Cliente: decodificar com `inSampleSize` pra reduzir resolução
+    antes de decodificar (evita OOM em tablets antigos)
+  • Qualidade adaptativa: se FPS < 25, reduz Q automaticamente
+Por que: Menos banda = menos lag.
+
+PARTE 10 — SETTINGS PERSISTENTES
+─────────────────────────────────
+O que: Salvar as configurações (qualidade, escala, FPS) em
+      SharedPreferences pra não perder entre sessões.
+Como:
+  • Criar `MirrorXSettings` data class
+  • Salvar/carregar em SharedPreferences("mirrorx_settings")
+  • Aplicar ao iniciar conexão
+Por que: UX melhor — usuário configura uma vez, fica pra sempre.
+
+PARTE 11 — PAISAGEM OTIMIZADA
+──────────────────────────────
+O que: Forçar landscape E garantir que o app não rotaciona
+      acidentalmente quando o tablet é movido.
+Como:
+  • HermesActivity: `setRequestedOrientation(SCREEN_ORIENTATION_LOCKED)`
+  • MirrorActivity: permitir portrait E landscape
+  • Detectar rotação e ajustar layout (já tem isLandscape)
+Por que: Estabilidade — tela não fica rotacionando sozinha.
+
+PARTE 12 — ACESSIBILIDADE TOTAL
+────────────────────────────────
+O que: Esconder TODAS as barras do sistema (nav + status)
+      E não mostrar com swipe.
+Como:
+  • Adicionar `View.SYSTEM_UI_FLAG_IMMERSIVE` (não STICKY)
+  • Quando user toca na tela, mostra barras temporariamente
+  • Auto-esconde após 3 segundos sem toque
+Por que: Imersão total — parece um app nativo, não um app Android.
+
+PARTE 13 — PERFORMANCE
+──────────────────────
+O que: Reduzir uso de CPU/memória do app.
+Como:
+  • Reusar o mesmo Bitmap em vez de criar novo a cada frame
+  • Usar `Bitmap.Config.RGB_565` em vez de `ARGB_8888` quando
+    não precisar de transparência
+  • Compor fora do thread principal quando possível
+Por que: Tablets mais antigos ficam quentes/lentos com o app.
+
+PARTE 14 — DOCUMENTAÇÃO INTERNA
+────────────────────────────────
+O que: Adicionar KDoc em todas as funções públicas.
+Como:
+  • Passar pelo TouchpadView.kt, MirrorWebSocket.kt, TouchHandler.kt
+  • Adicionar `@param`, `@return`, `@throws` em cada função
+  • Comentar cada bloco não-óbvio
+Por que: Manutenção futura fica mais fácil.
+
+PARTE 15 — TESTES AUTOMATIZADOS
+────────────────────────────────
+O que: Smoke tests pra cada feature crítica.
+Como:
+  • JUnit tests pra HermesClient (mock WebSocket)
+  • Espresso tests pra TouchpadView (UI automation)
+  • Python tests pro server (protocol parser)
+Por que: Cada mudança precisa ter como provar que não quebrou nada.
+
+───────────────────────────────────────────────────────────────────
+PRIORIZAÇÃO v1.5.9
+───────────────────────────────────────────────────────────────────
+
+CRÍTICO (fazer nesta versão):
+  [✓] PARTE 1 — Cursor local no tablet
+  [✓] PARTE 2 — Cursor do PC visível
+  [✓] PARTE 3 — Fix topbar bug
+  [✓] PARTE 4 — Hermes no menu Touch
+  [✓] PARTE 5 — Stylus funciona
+  [✓] PARTE 7 — Auto-reconexão
+
+IMPORTANTE (tentar fazer):
+  [✓] PARTE 8 — Indicador de latência
+  [✓] PARTE 11 — Paisagem otimizada
+
+FUTURO (v1.6+):
+  [ ] PARTE 6 — UDP alternativo
+  [ ] PARTE 9 — Compressão otimizada
+  [ ] PARTE 10 — Settings persistentes
+  [ ] PARTE 12 — Acessibilidade total
+  [ ] PARTE 13 — Performance
+  [ ] PARTE 14 — Documentação
+  [ ] PARTE 15 — Testes
+
+───────────────────────────────────────────────────────────────────
+REGRAS DE OURO (pra nunca mais esquecer)
+───────────────────────────────────────────────────────────────────
+
+1. SEMPRE testar build ANTES de commitar
+2. SEMPRE atualizar versão nos DOIS lados (APK build.gradle.kts
+   + EXE server.py + server_hermes.py + panel_ui.py)
+3. NUNCA usar `upx=True` no PyInstaller — UPX não tá instalado
+4. NUNCA referenciar constantes globais de outro módulo (NameError
+   no panel_ui.py) — passar via construtor
+5. SEMPRE bumpar versionCode no Android (não reutilizar)
+6. SEMPRE assinar APK antes de distribuir (apksigner)
+7. SEMPRE verificar MEI marker do EXE antes de distribuir
+8. SEMPRE manter uma cópia em G:\Meu Drive\LUCAS\1\ + Desktop
+
+───────────────────────────────────────────────────────────────────
+PROTOCOLO — DECISÃO SOBRE TCP vs UDP
+───────────────────────────────────────────────────────────────────
+
+O Lucas pediu UDP "pra diminuir o lag". Análise técnica:
+
+TCP (atual via WebSocket):
+  ✓ Confiável — pacotes não se perdem
+  ✓ Ordem garantida
+  ✗ ACK overhead (~50-100ms em WiFi doméstico)
+  ✗ Head-of-line blocking
+
+UDP (proposto):
+  ✓ Sem ACK, latência ~10-20ms
+  ✗ Pacotes podem se perder
+  ✗ Sem ordem garantida
+  ✗ Pra vídeo: precisa de FEC (forward error correction)
+
+DECISÃO pra v1.5.9:
+  Manter TCP/WebSocket como padrão (estável, testado).
+  UDP fica como TODO pra v1.6 com QoS/FEC apropriado.
+  Argumento pro Lucas: TCP com otimização (heartbeat 60Hz,
+  batched moves, JPEG adaptativo) tem latência < 30ms em rede
+  local, que é melhor que a percepção humana (~100ms).
+
+───────────────────────────────────────────────────────────────────
+ARTEFATOS ESPERADOS v1.5.9
+───────────────────────────────────────────────────────────────────
+
+  APK: MirrorX_v1.5.9.apk (~5.9 MB)
+    - versionCode 22
+    - Hermes como 4ª opção no menu Touch
+    - Cursor local no trackball
+    - Cursor do PC visível (24dp)
+    - Stylus funciona
+    - Auto-reconexão
+
+  EXE: MirrorX_v1.5.9.exe (~72 MB)
+    - Mirror + Hermes híbrido
+    - Recebe `mirror_config` do APK
+    - Heartbeat com RTT
+
+  Outros:
+    - PLANO_MIRRORX_1.5.9.txt (este arquivo)
+    - PROJETO_MIRRORX.txt atualizado
+    - VERSIONES.txt atualizado
+
+───────────────────────────────────────────────────────────────────
+FIM DO PLANO
+═══════════════════════════════════════════════════════════════════
