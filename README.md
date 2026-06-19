@@ -1,102 +1,134 @@
-# MirrorX
+# MirrorX v1.7.0
 
-**Turn any Android tablet into a wireless second screen for Windows.**
+**Transforme qualquer tablet Android em uma segunda tela sem fio para Windows.**
 
-No cables. No tablet app install. Just open Chrome and go.
+Sem cabos. Conexão direta via WiFi na rede local. Código aberto.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-blue)](https://github.com)
-[![Version](https://img.shields.io/badge/version-1.0.0-6366f1)](https://github.com)
+[![Version](https://img.shields.io/badge/version-1.7.0-6366f1)](https://github.com)
 
 ---
 
-## Why MirrorX?
+## Por que MirrorX?
 
 | | MirrorX | SuperDisplay | Spacedesk |
 |---|---|---|---|
-| **Price** | Free / R$22 lifetime | $14.99 | Free |
-| **Open Source** | ✅ MIT | ❌ | ❌ |
-| **Tablet App** | Browser (no install) | Android APK | Android APK |
-| **WiFi** | ✅ | ✅ | ✅ |
-| **Touch Input** | ✅ | ✅ | ✅ |
-| **Virtual Display** | Premium | ✅ | ✅ |
+| **Preço** | Grátis / R$10 Pro | $14.99 | Grátis |
+| **Código Aberto** | ✅ MIT | ❌ | ❌ |
+| **Captura de Tela** | DXGI nativo (GPU) | Proprietário | Proprietário |
+| **Cursor no Tablet** | ✅ Compositado | ✅ | ✅ |
+| **Toque → Mouse** | ✅ SendInput nativo | ✅ | ✅ |
+| **Modo Estender** | ✅ (via VDD) | ✅ | ✅ |
+| **Latência** | Baixa (JPEG direto) | Média | Alta |
 
 ---
 
-## Quick Start
+## Início Rápido
 
-### 1. Download & Install on PC
+### 1. Servidor no PC
 
-Download the latest `MirrorX.exe` from [Releases](https://github.com) and run it.
+Baixe `MirrorXServer.exe` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases) e execute.
 
-Or run from source:
+Não precisa instalar .NET — o exe já tem tudo embutido.
 
-```bash
-git clone https://github.com/YOUR_USER/mirrorx.git
-cd mirrorx
-pip install -r requirements.txt
-python server.py
+O servidor mostra o IP do PC e os monitores disponíveis.
+
+**Liberar porta 8080 no Firewall** (só uma vez):
+```powershell
+New-NetFirewallRule -DisplayName "MirrorX" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
 ```
 
-### 2. Open on Tablet
+### 2. APK no Tablet
 
-Open Chrome on your tablet and go to:
-```
-http://192.168.X.X:8080
-```
+Baixe `MirrorX_v1.7.0.apk` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases), instale no tablet e abra.
 
-The IP is shown in the MirrorX server window on your PC.
+Digite o IP do PC e conecte. A tela do PC aparece no tablet.
 
-### 3. Start Working
+### 3. Testar
 
-Your PC screen appears on your tablet. Touch, draw, type — just like a real monitor.
+Toque na tela do tablet → o mouse move no PC. Funciona como um touchpad/monitor.
 
 ---
 
-## Features
+## Free vs Pro
 
-- **DXGI Screen Capture** — Hardware-accelerated, low latency
-- **WebSocket Streaming** — 30 FPS (60 FPS Premium)
-- **Touch & Pen Input** — Tap, drag, scroll, draw
-- **100% Local** — Nothing leaves your WiFi network
-- **Multiple Modes** — Move cursor, click, or draw
-- **Keyboard Shortcuts** — Esc, Win, Tab, Enter from toolbar
-
----
-
-## Premium (R$22 Lifetime)
-
-| Feature | Free | Premium |
+| Funcionalidade | Free | Pro (R$10) |
 |---|---|---|
-| Screen Mirroring | ✅ | ✅ |
-| Touch Input | ✅ | ✅ |
-| Frame Rate | 30 FPS | 60 FPS |
-| Virtual Display Driver | ❌ | ✅ |
-| Multi-Monitor | ❌ | ✅ |
-| Stylus Pressure | ❌ | ✅ |
-| Custom Resolutions | ❌ | ✅ |
+| Espelhamento de tela | ✅ | ✅ |
+| Toque → Mouse | ✅ | ✅ |
+| Cursor visível no tablet | ✅ | ✅ |
+| Reconexão automática | ✅ | ✅ |
+| FPS | Até 24 | 30 e 60 |
+| Modo Estender (VDD) | ❌ | ✅ |
 
-[Get Premium License](https://github.com)
-
----
-
-## Tech Stack
-
-- **PC Server:** Python 3.11+, dxcam, OpenCV, websockets, PyAutoGUI
-- **Tablet Client:** HTML5 Canvas, WebSocket, Vanilla JS
-- **Packaging:** PyInstaller (.exe)
+**Como desbloquear o Pro:**
+1. No app, toque em 🔒30Hz ou 🔒60Hz
+2. Digite o código: `MIRRORX-PRO-10`
+3. Desbloqueado pra sempre
 
 ---
 
-## From Source
+## Modo Estender (2º Monitor Real)
 
-```bash
-git clone https://github.com/YOUR_USER/mirrorx.git
-cd mirrorx
-pip install -r requirements.txt
-python server.py
+O tablet vira uma área de trabalho separada — dá pra arrastar janelas pra lá.
+
+1. Instalar o VDD (Virtual Display Driver):
+```powershell
+winget install --id=VirtualDrivers.Virtual-Display-Driver -e
+```
+2. Reiniciar o PC
+3. Win+I → Sistema → Tela → Estender monitores
+4. Configurar o servidor pro monitor virtual (requer Pro)
+
+---
+
+## Arquitetura
+
+```
+[PC Windows]                              [Tablet Android]
+┌──────────────────────┐                  ┌──────────────────────┐
+│  MirrorXServer.exe   │                  │  MirrorX APK         │
+│  (.NET 8 + DXGI)     │  WebSocket :8080 │  (Kotlin + OkHttp)   │
+│                      │ ──frames JPEG──▶ │  → ImageView         │
+│  Cursor compositado  │ ◀──JSON toques───│  ← onTouchListener   │
+│  SendInput (mouse)   │                  │  ProManager (R$10)   │
+└──────────────────────┘                  └──────────────────────┘
 ```
 
-## License
+- **Protocolo:** WebSocket binário (JPEG do PC → tablet) + JSON (`{"type":"down/move/up","x","y"}`) do tablet → PC
+- **Cursor:** Compositado no frame (resolve bug clássico do DXGI que entrega tela sem ponteiro)
+- **Toque:** Coordenadas normalizadas (0.0 a 1.0), servidor mapeia pra posição real
 
-MIT — free for personal and commercial use. Premium features require a license key.
+---
+
+## Stack Técnica
+
+- **Servidor PC:** C# .NET 8, Vortice.Windows (DXGI), Fleck (WebSocket), System.Drawing (JPEG)
+- **Cliente Android:** Kotlin, Jetpack Compose, OkHttp WebSocket
+- **Protocolo:** JPEG frames + JSON touch events
+- **Porta:** 8080
+
+---
+
+## Compilar do Código Fonte
+
+### Servidor (C#)
+```bash
+cd server_dotnet
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+```
+
+### APK (Android)
+```bash
+cd android_source
+# Requer: JDK 17, Android SDK 34
+./gradlew assembleRelease
+# Assinar com apksigner
+```
+
+---
+
+## Licença
+
+MIT — livre para uso pessoal e comercial. Funcionalidades Pro requerem código de desbloqueio.
