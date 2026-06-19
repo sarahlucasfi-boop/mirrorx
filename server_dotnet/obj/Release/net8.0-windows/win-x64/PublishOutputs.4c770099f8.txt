@@ -1,0 +1,14 @@
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\MirrorXServer.exe
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\MirrorXServer.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\MirrorXServer.deps.json
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\MirrorXServer.runtimeconfig.json
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\MirrorXServer.pdb
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\Fleck.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\Microsoft.Win32.SystemEvents.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\SharpGen.Runtime.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\SharpGen.Runtime.COM.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\System.Drawing.Common.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\Vortice.Direct3D11.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\Vortice.DirectX.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\Vortice.DXGI.dll
+C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish\Vortice.Mathematics.dll
