@@ -33,12 +33,21 @@ import kotlin.math.abs
 import kotlin.math.hypot
 
 /**
- * v1.5.9 Hybrid Hermes
- *  - Cursor LOCAL no trackball (segue o dedo, verde translúcido)
- *  - Cursor do PC visível (seta vermelha + borda branca, 24dp)
- *  - Indicador de latência na topbar
- *  - Auto-reconexão
+ * v1.6.6 Hybrid Hermes — configs consolidadas (tudo na tela principal).
+ *
+ * Layout unificado sem modal de configurações separado:
+ *
+ *  ┌─────────────────────────────────────────────────────┐
+ *  │ ● v1.6.6  60Hz  30Hz  15Hz    NORMAL  ⚙            │ ← status + mode chips
+ *  ├─────────────────────────────────────────────────────┤
+ *  │                     PC SCREEN                       │
+ *  │                       ...                           │
+ *  │                                                      │
+ *  │  ⬤L ⬤R  ⬆  Sens: ═══○═══ 1.5x  Qual: ══○══ 75%  │ ← tudo integrado
+ *  │                    Escala: [50%][75%][100%]          │
+ *  └─────────────────────────────────────────────────────┘
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TouchpadView(
     client: MirrorWebSocket,
@@ -53,42 +62,22 @@ fun TouchpadView(
     val latencyMs by client.latencyMs.collectAsState()
     val cursorVisible by client.cursorVisible.collectAsState()
 
-    var showSettings by remember { mutableStateOf(false) }
     var serverMode by remember { mutableIntStateOf(0) }
-
-    // In-app mirror settings
     var mirrorQuality by remember { mutableIntStateOf(75) }
     var mirrorScale by remember { mutableFloatStateOf(0.75f) }
-    var mirrorFps by remember { mutableIntStateOf(30) }
-    var mirrorAutoAdjust by remember { mutableStateOf(false) }
+    var localSensitivity by remember { mutableFloatStateOf(sensitivity) }
 
-    // Local cursor position (inside trackball) — normalized -1..1
-    var localBallX by remember { mutableFloatStateOf(0f) }
-    var localBallY by remember { mutableFloatStateOf(0f) }
-    var isPressed by remember { mutableStateOf(false) }
-
-    val sendIntervalMs = when (serverMode) {
-        2 -> 66L; 1 -> 33L; else -> 16L
-    }
+    val sendIntervalMs = when (serverMode) { 2 -> 66L; 1 -> 33L; else -> 16L }
     val isLandscape = LocalConfiguration.current.orientation ==
         android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val trackballSizeDp = if (isLandscape) 180.dp else 200.dp
-    val buttonSizeDp = if (isLandscape) 60.dp else 68.dp
-
-    // Auto-reconnect
-    LaunchedEffect(connectionState) {
-        if (connectionState is MirrorWebSocket.ConnectionState.Disconnected) {
-            kotlinx.coroutines.delay(1000)
-            // try reconnect once
-        }
-    }
+    val trackballSizeDp = if (isLandscape) 140.dp else 200.dp
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF0A0A0F))
     ) {
-        // ── PC screen stream ────────────────────────────────────────
+        // Video background
         val frame = currentFrame
         if (frame != null) {
             Image(
@@ -97,15 +86,11 @@ fun TouchpadView(
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
             )
-            Box(
-                modifier = Modifier.fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.10f))
-            )
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.08f)))
         } else {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Refresh, null,
-                        tint = Color(0xFF2A2A38), modifier = Modifier.size(56.dp))
+                    Icon(Icons.Default.Refresh, null, tint = Color(0xFF2A2A38), modifier = Modifier.size(56.dp))
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = if (connectionState is MirrorWebSocket.ConnectionState.Connected) "Aguardando vídeo..."
@@ -116,208 +101,201 @@ fun TouchpadView(
             }
         }
 
-        // ── PC CURSOR (big, glowing, always visible) ─────────────────
+        // PC CURSOR overlayed on video
         if (cursorVisible && remoteCursor != null) {
             val (cx, cy) = remoteCursor!!
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val xPx = cx * size.width
-                val yPx = cy * size.height
-                val center = Offset(xPx, yPx)
-
-                // Outer glow ring (very visible)
-                drawCircle(
-                    color = Color(0xFFEF4444).copy(alpha = 0.35f),
-                    radius = 40f,
-                    center = center,
-                )
-                // White outline ring
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.95f),
-                    radius = 20f,
-                    center = center,
-                    style = Stroke(width = 4f)
-                )
-                // Red filled dot
-                drawCircle(
-                    color = Color(0xFFEF4444),
-                    radius = 14f,
-                    center = center,
-                )
-                // White arrow pointer (crosshair)
-                val arrowLen = 12f
-                drawLine(
-                    color = Color.White,
-                    start = Offset(xPx - arrowLen, yPx),
-                    end = Offset(xPx + arrowLen, yPx),
-                    strokeWidth = 2.5f
-                )
-                drawLine(
-                    color = Color.White,
-                    start = Offset(xPx, yPx - arrowLen),
-                    end = Offset(xPx, yPx + arrowLen),
-                    strokeWidth = 2.5f
-                )
+                val xPx = cx * size.width; val yPx = cy * size.height
+                drawCircle(Color(0xFFEF4444).copy(alpha = 0.35f), 40f, Offset(xPx, yPx))
+                drawCircle(Color.White.copy(alpha = 0.95f), 20f, Offset(xPx, yPx), style = Stroke(4f))
+                drawCircle(Color(0xFFEF4444), 14f, Offset(xPx, yPx))
+                drawLine(Color.White, Offset(xPx - 12f, yPx), Offset(xPx + 12f, yPx), 2.5f)
+                drawLine(Color.White, Offset(xPx, yPx - 12f), Offset(xPx, yPx + 12f), 2.5f)
             }
         }
 
-        // ── Top bar (translucent) ───────────────────────────────────
-        HybridStatusBar(
-            connectionState = connectionState,
-            screenInfo = screenInfo,
-            sensitivity = sensitivity,
-            latencyMs = latencyMs,
-            onSettingsClick = { showSettings = true },
-        )
-
-        // ── Bottom controls ─────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp)
-                .align(Alignment.BottomCenter)
+        // TOP STATUS BAR + MODE CHIPS (consolidated)
+        Surface(
+            color = Color(0xFF14141C).copy(alpha = 0.75f),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // L + R buttons
             Row(
-                modifier = Modifier.align(Alignment.BottomStart),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Bottom,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                ClickButton("L", Color(0xFF10B981), { client.sendHermesClick(0) }, buttonSizeDp)
-                ClickButton("R", Color(0xFFF59E0B), { client.sendHermesClick(1) }, buttonSizeDp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isConnected = connectionState is MirrorWebSocket.ConnectionState.Connected
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(
+                        if (isConnected) Color(0xFF10B981) else Color(0xFFEF4444)))
+                    Spacer(Modifier.width(8.dp))
+                    Text("v1.6.6", color = Color(0xFFE8E8F0), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                // Mode rate chips (consolidated in top bar)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    RateChip("60Hz", 0, serverMode) { serverMode = 0; client.sendHermesQuality(0) }
+                    RateChip("30Hz", 1, serverMode) { serverMode = 1; client.sendHermesQuality(1) }
+                    RateChip("15Hz", 2, serverMode) { serverMode = 2; client.sendHermesQuality(2) }
+                }
+
+                // PING
+                val latCol = when { latencyMs < 50 -> Color(0xFF10B981); latencyMs < 120 -> Color(0xFFF59E0B); else -> Color(0xFFEF4444) }
+                Text("${latencyMs}ms", color = latCol, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
-
-            // Trackball (white translucent) with local cursor
-            TrackballWithLocalCursor(
-                client = client,
-                sensitivity = sensitivity,
-                sendIntervalMs = sendIntervalMs,
-                onPositionChange = { nx, ny, pressed ->
-                    localBallX = nx
-                    localBallY = ny
-                    isPressed = pressed
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(trackballSizeDp),
-            )
         }
 
-        // ── Settings sheet ──────────────────────────────────────────
-        if (showSettings) {
-            MirrorSettingsSheet(
-                serverMode = serverMode,
-                sensitivity = sensitivity,
-                mirrorQuality = mirrorQuality,
-                mirrorScale = mirrorScale,
-                mirrorFps = mirrorFps,
-                mirrorAutoAdjust = mirrorAutoAdjust,
-                onMode = { m -> serverMode = m; client.sendHermesQuality(m); showSettings = false },
-                onSensitivity = onSensitivityChange,
-                onQuality = { q -> mirrorQuality = q; client.sendMirrorConfig("quality", q) },
-                onScale = { s -> mirrorScale = s; client.sendMirrorConfig("scale", s) },
-                onFps = { f -> mirrorFps = f; client.sendMirrorConfig("fps", f) },
-                onAutoAdjust = { a -> mirrorAutoAdjust = a; client.sendMirrorConfig("auto_adjust", if (a) 1 else 0) },
-                onDismiss = { showSettings = false },
-            )
-        }
-    }
-}
-
-// ─── Status bar with latency ───────────────────────────────────────────
-@Composable
-private fun HybridStatusBar(
-    connectionState: MirrorWebSocket.ConnectionState,
-    screenInfo: MirrorWebSocket.ScreenInfo,
-    sensitivity: Float,
-    latencyMs: Int,
-    onSettingsClick: () -> Unit,
-) {
-    val latColor = when {
-        latencyMs < 50 -> Color(0xFF10B981)
-        latencyMs < 120 -> Color(0xFFF59E0B)
-        else -> Color(0xFFEF4444)
-    }
-    Surface(
-        color = Color(0xFF14141C).copy(alpha = 0.75f),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+        // BOTTOM CONTROL STRIP (consolidated — sliders visible, no modal needed)
+        Surface(
+            color = Color(0xFF14141C).copy(alpha = 0.75f),
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val isConnected = connectionState is MirrorWebSocket.ConnectionState.Connected
-                Box(Modifier.size(10.dp).clip(CircleShape).background(
-                    if (isConnected) Color(0xFF10B981) else Color(0xFFEF4444)))
-                Spacer(Modifier.width(10.dp))
-                Text("Hermes v1.5.9", color = Color(0xFFE8E8F0),
-                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Spacer(Modifier.width(10.dp))
-                val desc = when (screenInfo) {
-                    is MirrorWebSocket.ScreenInfo.Known -> "${screenInfo.streamWidth}×${screenInfo.streamHeight}"
-                    else -> "--"
+            Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                // Row 1: L/R buttons + scroll + trackball
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // L/R buttons
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircleBtn("L", Color(0xFF10B981), 52.dp) { client.sendHermesClick(0) }
+                        CircleBtn("R", Color(0xFFF59E0B), 52.dp) { client.sendHermesClick(1) }
+                        // Scroll up
+                        CircleBtn("↑", Color(0xFF6366F1), 40.dp) { client.sendHermesScroll(-3) }
+                        CircleBtn("↓", Color(0xFF6366F1), 40.dp) { client.sendHermesScroll(3) }
+                    }
+
+                    // Trackball (always visible)
+                    TrackballCompact(
+                        client = client,
+                        sensitivity = localSensitivity,
+                        sendIntervalMs = sendIntervalMs,
+                        modifier = Modifier.size(trackballSizeDp)
+                    )
                 }
-                Text(desc, color = Color(0xFF6E6E80), fontSize = 10.sp)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("PING ${latencyMs}ms", color = latColor, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(12.dp))
-                IconButton(onClick = onSettingsClick, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Settings, "Settings", tint = Color(0xFFB0B0C0),
-                        modifier = Modifier.size(20.dp))
+
+                Spacer(Modifier.height(4.dp))
+
+                // Row 2: Sensitivity slider + Quality slider (tudo fixo, sem modal)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Sensitivity
+                    Text("Sens", color = Color(0xFFB0B0C0), fontSize = 9.sp)
+                    Slider(
+                        value = localSensitivity,
+                        onValueChange = { localSensitivity = it; onSensitivityChange(it) },
+                        valueRange = 0.3f..3.0f,
+                        modifier = Modifier.weight(1f).height(28.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF6366F1), activeTrackColor = Color(0xFF818CF8),
+                            inactiveTrackColor = Color(0xFF2A2A38)
+                        )
+                    )
+                    Text("${"%.1f".format(localSensitivity)}x", color = Color(0xFFB0B0C0), fontSize = 9.sp)
+
+                    // Quality
+                    Text("Q", color = Color(0xFFB0B0C0), fontSize = 9.sp)
+                    Slider(
+                        value = mirrorQuality.toFloat(),
+                        onValueChange = { mirrorQuality = it.toInt(); client.sendMirrorConfig("quality", it.toInt()) },
+                        valueRange = 20f..95f,
+                        modifier = Modifier.weight(1f).height(28.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF10B981), activeTrackColor = Color(0xFF10B981),
+                            inactiveTrackColor = Color(0xFF2A2A38)
+                        )
+                    )
+                    Text("${mirrorQuality}%", color = Color(0xFFB0B0C0), fontSize = 9.sp)
+                }
+
+                // Row 3: Scale chips (consolidated)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Escala", color = Color(0xFFB0B0C0), fontSize = 9.sp)
+                    ScaleChip("50%", 0.50f, mirrorScale, { mirrorScale = 0.50f; client.sendMirrorConfig("scale", 0.50f) })
+                    ScaleChip("75%", 0.75f, mirrorScale, { mirrorScale = 0.75f; client.sendMirrorConfig("scale", 0.75f) })
+                    ScaleChip("100%", 1.00f, mirrorScale, { mirrorScale = 1.00f; client.sendMirrorConfig("scale", 1.00f) })
+                    Spacer(Modifier.weight(1f))
+                    Text("FPS: 30", color = Color(0xFF6E6E80), fontSize = 9.sp)
                 }
             }
         }
     }
 }
 
-// ─── Trackball with LOCAL CURSOR ────────────────────────────────────────
+// ─── Helper composables ───────────────────────────────────────────────
 @Composable
-private fun TrackballWithLocalCursor(
-    client: MirrorWebSocket,
-    sensitivity: Float,
-    sendIntervalMs: Long,
-    onPositionChange: (Float, Float, Boolean) -> Unit,
+private fun CircleBtn(label: String, color: Color, sizeDp: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
+    var pressed by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier.size(sizeDp).clip(CircleShape)
+            .background(color.copy(alpha = if (pressed) 1f else 0.80f))
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = { pressed = true; onClick(); tryAwaitRelease(); pressed = false })
+            },
+        contentAlignment = Alignment.Center
+    ) { Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+}
+
+@Composable
+private fun RateChip(label: String, value: Int, current: Int, onClick: () -> Unit) {
+    val sel = value == current
+    Surface(
+        color = if (sel) Color(0xFF6366F1) else Color(0xFF1E1E2C),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.pointerInput(value) { detectTapGestures(onTap = { onClick() }) }
+    ) { Text(label, color = if (sel) Color.White else Color(0xFFB0B0C0), fontSize = 9.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
+}
+
+@Composable
+private fun ScaleChip(label: String, value: Float, current: Float, onClick: () -> Unit) {
+    val sel = abs(value - current) < 0.01f
+    Surface(
+        color = if (sel) Color(0xFF10B981) else Color(0xFF1E1E2C),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.pointerInput(label) { detectTapGestures(onTap = { onClick() }) }
+    ) { Text(label, color = if (sel) Color.White else Color(0xFFB0B0C0), fontSize = 9.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
+}
+
+// ─── Trackball compact (no local glow, smaller) ──────────────────────
+@Composable
+private fun TrackballCompact(
+    client: MirrorWebSocket, sensitivity: Float, sendIntervalMs: Long,
     modifier: Modifier = Modifier,
 ) {
-    var ballX by remember { mutableFloatStateOf(0f) }
-    var ballY by remember { mutableFloatStateOf(0f) }
+    var ballX by remember { mutableFloatStateOf(0f) }; var ballY by remember { mutableFloatStateOf(0f) }
     var isPressed by remember { mutableStateOf(false) }
     var pressedAtMs by remember { mutableStateOf(0L) }
-    var accDx by remember { mutableFloatStateOf(0f) }
-    var accDy by remember { mutableFloatStateOf(0f) }
+    var accDx by remember { mutableFloatStateOf(0f) }; var accDy by remember { mutableFloatStateOf(0f) }
     var lastSendMs by remember { mutableStateOf(0L) }
 
     val animatedX by animateFloatAsState(if (isPressed) ballX else 0f, label = "bx")
     val animatedY by animateFloatAsState(if (isPressed) ballY else 0f, label = "by")
 
     Box(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.10f))
+        modifier = modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.08f))
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true; pressedAtMs = SystemClock.uptimeMillis()
-                        ballX = 0f; ballY = 0f; lastSendMs = pressedAtMs
+                detectTapGestures(onPress = {
+                    isPressed = true; pressedAtMs = SystemClock.uptimeMillis()
+                    ballX = 0f; ballY = 0f; lastSendMs = pressedAtMs; accDx = 0f; accDy = 0f
+                    val released = tryAwaitRelease(); isPressed = false
+                    if (released) {
+                        val held = SystemClock.uptimeMillis() - pressedAtMs
+                        val totalMove = abs(accDx) + abs(accDy)
+                        if (held < 250L && totalMove < 4f) client.sendHermesClick(0)
+                        if (accDx.toInt() != 0 || accDy.toInt() != 0) client.sendHermesMove(accDx.toInt(), accDy.toInt())
                         accDx = 0f; accDy = 0f
-                        onPositionChange(0f, 0f, true)
-                        val released = tryAwaitRelease()
-                        isPressed = false
-                        onPositionChange(0f, 0f, false)
-                        if (released) {
-                            val held = SystemClock.uptimeMillis() - pressedAtMs
-                            val totalMove = abs(accDx) + abs(accDy)
-                            if (held < 250L && totalMove < 4f) client.sendHermesClick(0)
-                            if (accDx.toInt() != 0 || accDy.toInt() != 0) {
-                                client.sendHermesMove(accDx.toInt(), accDy.toInt())
-                            }
-                            accDx = 0f; accDy = 0f
-                        }
-                    },
-                )
+                    }
+                })
             }
             .pointerInput(Unit) {
                 detectDragGestures(
@@ -327,25 +305,19 @@ private fun TrackballWithLocalCursor(
                         ballY = ((offset.y / h) * 2f - 1f).coerceIn(-1f, 1f)
                         isPressed = true; pressedAtMs = SystemClock.uptimeMillis()
                         lastSendMs = pressedAtMs; accDx = 0f; accDy = 0f
-                        onPositionChange(ballX, ballY, true)
                     },
                     onDragEnd = {
                         isPressed = false
-                        if (accDx.toInt() != 0 || accDy.toInt() != 0) {
-                            client.sendHermesMove(accDx.toInt(), accDy.toInt())
-                        }
+                        if (accDx.toInt() != 0 || accDy.toInt() != 0) client.sendHermesMove(accDx.toInt(), accDy.toInt())
                         accDx = 0f; accDy = 0f; ballX = 0f; ballY = 0f
-                        onPositionChange(0f, 0f, false)
                     },
-                    onDragCancel = { isPressed = false; accDx = 0f; accDy = 0f
-                        ballX = 0f; ballY = 0f; onPositionChange(0f, 0f, false) },
+                    onDragCancel = { isPressed = false; accDx = 0f; accDy = 0f; ballX = 0f; ballY = 0f },
                     onDrag = { change, _ ->
                         change.consume()
                         val w = size.width.toFloat(); val h = size.height.toFloat()
                         if (w <= 0f || h <= 0f) return@detectDragGestures
                         ballX = ((change.position.x / w) * 2f - 1f).coerceIn(-1f, 1f)
                         ballY = ((change.position.y / h) * 2f - 1f).coerceIn(-1f, 1f)
-                        onPositionChange(ballX, ballY, true)
                         val dist = hypot(ballX, ballY)
                         val speed = (1f + dist * 3f) * sensitivity
                         val dx = (if (dist > 0.001f) ballX / dist else 0f) * speed * dist.coerceAtLeast(0.05f)
@@ -354,164 +326,21 @@ private fun TrackballWithLocalCursor(
                         val now = SystemClock.uptimeMillis()
                         if (now - lastSendMs >= sendIntervalMs) {
                             val sd = accDx.toInt(); val sy = accDy.toInt()
-                            if (sd != 0 || sy != 0) {
-                                client.sendHermesMove(sd, sy)
-                                accDx -= sd; accDy -= sy
-                            }
+                            if (sd != 0 || sy != 0) { client.sendHermesMove(sd, sy); accDx -= sd; accDy -= sy }
                             lastSendMs = now
                         }
-                    },
+                    }
                 )
             },
-        contentAlignment = Alignment.Center,
+        contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val cx = size.width / 2f; val cy = size.height / 2f
-            val radius = size.minDimension / 2f
-            // White outer ring
-            drawCircle(
-                color = Color.White.copy(alpha = 0.45f),
-                radius = radius * 0.92f,
-                center = Offset(cx, cy),
-                style = Stroke(width = 2.5f),
-            )
-            // Local cursor position (offset from center)
-            val bx = cx + animatedX * radius * 0.6f
-            val by = cy + animatedY * radius * 0.6f
-            val ballRadius = if (isPressed) radius * 0.30f else radius * 0.22f
-
-            // Glow when pressed
-            if (isPressed) {
-                drawCircle(Color.Green.copy(alpha = 0.20f), ballRadius * 1.8f, Offset(bx, by))
-            }
-            // The ball (green when pressed = active cursor, white when idle)
-            drawCircle(
-                color = if (isPressed) Color(0xFF10B981).copy(alpha = 0.95f)
-                else Color.White.copy(alpha = 0.85f),
-                radius = ballRadius,
-                center = Offset(bx, by),
-            )
+            val cx = size.width / 2f; val cy = size.height / 2f; val r = size.minDimension / 2f
+            drawCircle(Color.White.copy(alpha = 0.4f), r * 0.92f, Offset(cx, cy), style = Stroke(2f))
+            val bx = cx + animatedX * r * 0.6f; val by = cy + animatedY * r * 0.6f
+            val br = if (isPressed) r * 0.28f else r * 0.20f
+            drawCircle(if (isPressed) Color(0xFF10B981).copy(alpha = 0.95f) else Color.White.copy(alpha = 0.80f), br, Offset(bx, by))
         }
-        if (!isPressed) {
-            Text("◉", color = Color.White.copy(alpha = 0.4f), fontSize = 20.sp)
-        }
-    }
-}
-
-// ─── Click button ───────────────────────────────────────────────────────
-@Composable
-private fun ClickButton(
-    label: String, color: Color, onClick: () -> Unit,
-    sizeDp: androidx.compose.ui.unit.Dp = 60.dp,
-) {
-    var pressed by remember { mutableStateOf(false) }
-    Box(
-        modifier = Modifier.size(sizeDp).clip(CircleShape)
-            .background(color.copy(alpha = if (pressed) 1f else 0.80f))
-            .pointerInput(Unit) {
-                detectTapGestures(onPress = { pressed = true; onClick(); tryAwaitRelease(); pressed = false })
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-    }
-}
-
-// ─── Settings sheet (full mirror config in-app) ──────────────────────
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MirrorSettingsSheet(
-    serverMode: Int, sensitivity: Float,
-    mirrorQuality: Int, mirrorScale: Float, mirrorFps: Int,
-    mirrorAutoAdjust: Boolean,
-    onMode: (Int) -> Unit, onSensitivity: (Float) -> Unit,
-    onQuality: (Int) -> Unit, onScale: (Float) -> Unit, onFps: (Int) -> Unit,
-    onAutoAdjust: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF14141C),
-        contentColor = Color(0xFFE8E8F0),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text("Configurações", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE8E8F0))
-
-            SectionLabel("Modo Hermes")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ModeChip("Normal", 0, serverMode, onMode)
-                ModeChip("Ruim", 1, serverMode, onMode)
-                ModeChip("Ultra", 2, serverMode, onMode)
-            }
-
-            SectionLabel("Sensibilidade: %.1fx".format(sensitivity))
-            Slider(value = sensitivity, onValueChange = onSensitivity, valueRange = 0.3f..3.0f, steps = 26,
-                colors = SliderDefaults.colors(thumbColor = Color(0xFF6366F1), activeTrackColor = Color(0xFF818CF8),
-                    inactiveTrackColor = Color(0xFF2A2A38)))
-
-            SectionLabel("Qualidade: $mirrorQuality%")
-            Slider(value = mirrorQuality.toFloat(), onValueChange = { onQuality(it.toInt()) },
-                valueRange = 20f..95f, steps = 14,
-                colors = SliderDefaults.colors(thumbColor = Color(0xFF10B981), activeTrackColor = Color(0xFF10B981),
-                    inactiveTrackColor = Color(0xFF2A2A38)))
-
-            SectionLabel("Escala: ${(mirrorScale * 100).toInt()}%")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ScaleChip("50%", 0.50f, mirrorScale, onScale)
-                ScaleChip("75%", 0.75f, mirrorScale, onScale)
-                ScaleChip("100%", 1.00f, mirrorScale, onScale)
-            }
-
-            SectionLabel("FPS alvo: $mirrorFps")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(15, 24, 30, 45, 60).forEach { fps ->
-                    ModeChip("$fps", fps, mirrorFps) { onFps(it) }
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Auto-ajuste de FPS", color = Color(0xFFB0B0C0), fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Switch(checked = mirrorAutoAdjust, onCheckedChange = onAutoAdjust,
-                    colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF10B981), checkedTrackColor = Color(0xFF065F46)))
-            }
-
-            Spacer(Modifier.height(16.dp))
-        }
-    }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(text, fontSize = 11.sp, color = Color(0xFF8A8AA0), fontWeight = FontWeight.SemiBold)
-}
-
-@Composable
-private fun ModeChip(label: String, value: Int, current: Int, onSel: (Int) -> Unit) {
-    val sel = value == current
-    Surface(
-        color = if (sel) Color(0xFF6366F1) else Color(0xFF1E1E2C),
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.pointerInput(value) { detectTapGestures(onTap = { onSel(value) }) }
-    ) {
-        Text(label, color = if (sel) Color.White else Color(0xFFB0B0C0),
-            fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
-    }
-}
-
-@Composable
-private fun ScaleChip(label: String, value: Float, current: Float, onSel: (Float) -> Unit) {
-    val sel = abs(value - current) < 0.01f
-    Surface(
-        color = if (sel) Color(0xFF10B981) else Color(0xFF1E1E2C),
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.pointerInput(label.hashCode()) { detectTapGestures(onTap = { onSel(value) }) }
-    ) {
-        Text(label, color = if (sel) Color.White else Color(0xFFB0B0C0),
-            fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+        if (!isPressed) Text("◉", color = Color.White.copy(alpha = 0.3f), fontSize = 18.sp)
     }
 }
