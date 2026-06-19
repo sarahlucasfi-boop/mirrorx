@@ -38,7 +38,7 @@ from typing import Callable, Optional, Set, List
 
 log = logging.getLogger("mirrorx")
 
-VERSION = "1.6.4"
+VERSION = "1.6.5"
 DEFAULT_PORT = 9900
 
 
@@ -343,6 +343,10 @@ class MirrorMode:
                 await asyncio.sleep(sleep_for)
 
     def _get_cursor_state(self):
+        # v1.6.5: ALWAYS return True for cursor_visible so the tablet 
+        # overlay always draws the PC cursor. The server has no way to
+        # know whether a stylus is being used — that's a tablet-side
+        # decision. Force it ON.
         try:
             import pyautogui
             x, y = pyautogui.position()
@@ -350,7 +354,7 @@ class MirrorMode:
                     min(65535, max(0, int(y))),
                     True)
         except Exception:
-            return (0, 0, False)
+            return (0, 0, True)  # even on error, say visible
 
     async def _safe_send(self, ws, payload):
         try:

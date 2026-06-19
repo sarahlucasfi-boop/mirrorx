@@ -51,6 +51,7 @@ fun TouchpadView(
     val screenInfo by client.screenInfo.collectAsState()
     val remoteCursor by client.remoteCursor.collectAsState()
     val latencyMs by client.latencyMs.collectAsState()
+    val cursorVisible by client.cursorVisible.collectAsState()
 
     var showSettings by remember { mutableStateOf(false) }
     var serverMode by remember { mutableIntStateOf(0) }
@@ -115,29 +116,46 @@ fun TouchpadView(
             }
         }
 
-        // ── PC CURSOR (24dp red arrow) ──────────────────────────────
-        remoteCursor?.let { (cx, cy) ->
+        // ── PC CURSOR (big, glowing, always visible) ─────────────────
+        if (cursorVisible && remoteCursor != null) {
+            val (cx, cy) = remoteCursor!!
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val xPx = cx * size.width
                 val yPx = cy * size.height
+                val center = Offset(xPx, yPx)
+
+                // Outer glow ring (very visible)
+                drawCircle(
+                    color = Color(0xFFEF4444).copy(alpha = 0.35f),
+                    radius = 40f,
+                    center = center,
+                )
                 // White outline ring
                 drawCircle(
-                    color = Color.White.copy(alpha = 0.8f),
-                    radius = 24f,
-                    center = Offset(xPx, yPx),
-                    style = Stroke(width = 3f)
+                    color = Color.White.copy(alpha = 0.95f),
+                    radius = 20f,
+                    center = center,
+                    style = Stroke(width = 4f)
                 )
-                // Red filled arrow dot
+                // Red filled dot
                 drawCircle(
-                    color = Color(0xFFEF4444).copy(alpha = 0.95f),
-                    radius = 18f,
-                    center = Offset(xPx, yPx),
+                    color = Color(0xFFEF4444),
+                    radius = 14f,
+                    center = center,
                 )
-                // White inner crosshair
-                drawCircle(
+                // White arrow pointer (crosshair)
+                val arrowLen = 12f
+                drawLine(
                     color = Color.White,
-                    radius = 4f,
-                    center = Offset(xPx, yPx),
+                    start = Offset(xPx - arrowLen, yPx),
+                    end = Offset(xPx + arrowLen, yPx),
+                    strokeWidth = 2.5f
+                )
+                drawLine(
+                    color = Color.White,
+                    start = Offset(xPx, yPx - arrowLen),
+                    end = Offset(xPx, yPx + arrowLen),
+                    strokeWidth = 2.5f
                 )
             }
         }
