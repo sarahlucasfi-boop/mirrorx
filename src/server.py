@@ -38,7 +38,7 @@ from typing import Callable, Optional, Set, List
 
 log = logging.getLogger("mirrorx")
 
-VERSION = "1.6.6"
+VERSION = "1.6.7"
 DEFAULT_PORT = 9900
 
 
@@ -516,21 +516,40 @@ class MirrorMode:
     # ------------------------------------------------------------------
 
     def _handle_touch_path_binary(self, raw):
-        """0x10 [count:u8] [(x:u16 LE)(y:u16 LE) ...]"""
+        """0x10 [count:u8] [(x:u16 LE)(y:u16 LE) ...]
+        
+        v1.4.0 note: the client encodes normalised touch coords [0..1]
+        as u16 pixels (0..65535). The original v1.4.2 handler treated
+        these as RELATIVE deltas (moveRel), which is wrong — a mid-screen
+        coord of 32767 would try to move 32767px, crash the cursor to
+        random positions, flood the input queue and drop the WebSocket.
+        
+        v1.6.7: convert u16 → normalised [0..1] → absolute screen px.
+        Only issue one absolute move per BATCH (last point); ignore the
+        intermediate path points as they are just intermediate positions.
+        """
         if len(raw) < 2:
             return
         count = raw[1]
         expected = 2 + count * 4
         if len(raw) < expected:
             return
+        # Get the LAST point (final position) — that's where the finger
+        # ended up. The intermediate path points are for smoothing on the
+        # client side, not for us.
+        off = 2 + (count - 1) * 4
+        x, y = struct.unpack("<HH", raw[off:off + 4])
+        sw, sh = self._screen_size or (1920, 1080)
+        # Convert u16 (0..65535) → normalised (0..1) → absolute pixels
+        nx = x / 65535.0
+        ny = y / 65535.0
+        abs_x = int(nx * sw)
+        abs_y = int(ny * sh)
         try:
             import pyautogui
         except ImportError:
             return
-        for i in range(count):
-            off = 2 + i * 4
-            x, y = struct.unpack("<HH", raw[off:off + 4])
-            pyautogui.moveRel(int(x), int(y), _pause=False)
+        pyautogui.moveTo(abs_x, abs_y, _pause=False)
 
     def _handle_pinch(self, raw):
         """0x11 [scale:f32 LE][cx:f32 LE][cy:f32 LE]"""
