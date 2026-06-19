@@ -21,7 +21,7 @@ Sem cabos. Conexão direta via WiFi na rede local. Código aberto.
 | FPS | 24 | 30 / 60 |
 | Modo Estender (2º monitor) | ❌ | ✅ |
 
-**Desbloqueio instantâneo** — sem cadastro, sem assinatura. Toque em 🔒30Hz no app, digite o código `MIRRORX-PRO-10`, e pronto. Pra sempre.
+**Desbloqueio instantâneo** — sem cadastro, sem assinatura. Toque em 🔒30Hz no app, digite o código incluso no .zip da release, e pronto. Pra sempre. Senha do .zip: `324125`.
 
 ---
 
