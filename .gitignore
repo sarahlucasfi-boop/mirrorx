@@ -1,14 +1,20 @@
-__pycache__/
-*.pyc
-*.pyo
-dist/
-build/
-*.spec
-*.exe
-.venv/
-venv/
-.env
-*.egg-info/
-# Large files excluded from Git
-android_source/gradle-8.5/
-android_source/gradle-8.5-bin.zip
+# Build outputs
+server_dotnet/bin/
+server_dotnet/obj/
+server_dotnet/publish/
+server_dotnet/publish_standalone/
+server_dotnet/publish_singlefile/
+server_dotnet/*.exe
+server_dotnet/*.dll
+server_dotnet/*.pdb
+
+# Android build
+android_source/app/build/
+android_source/build/
+android_source/.gradle/
+android_source/local.properties
+
+# OS
+desktop.ini
+Thumbs.db
+.DS_Store
