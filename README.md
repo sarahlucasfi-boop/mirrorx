@@ -10,17 +10,18 @@ Sem cabos. Conexão direta via WiFi na rede local. Código aberto.
 
 ---
 
-## Por que MirrorX?
+## Free vs Pro
 
-| | MirrorX | SuperDisplay | Spacedesk |
-|---|---|---|---|
-| **Preço** | Grátis / R$10 Pro | $14.99 | Grátis |
-| **Código Aberto** | ✅ MIT | ❌ | ❌ |
-| **Captura de Tela** | DXGI nativo (GPU) | Proprietário | Proprietário |
-| **Cursor no Tablet** | ✅ Compositado | ✅ | ✅ |
-| **Toque → Mouse** | ✅ SendInput nativo | ✅ | ✅ |
-| **Modo Estender** | ✅ (via VDD) | ✅ | ✅ |
-| **Latência** | Baixa (JPEG direto) | Média | Alta |
+| Funcionalidade | Free | Pro (R$10) |
+|---|---|---|
+| Espelhamento de tela | ✅ | ✅ |
+| Toque → Mouse | ✅ | ✅ |
+| Cursor visível no tablet | ✅ | ✅ |
+| Reconexão automática | ✅ | ✅ |
+| FPS | 24 | 30 / 60 |
+| Modo Estender (2º monitor) | ❌ | ✅ |
+
+**Desbloqueio instantâneo** — sem cadastro, sem assinatura. Toque em 🔒30Hz no app, digite o código `MIRRORX-PRO-10`, e pronto. Pra sempre.
 
 ---
 
@@ -30,9 +31,9 @@ Sem cabos. Conexão direta via WiFi na rede local. Código aberto.
 
 Baixe `MirrorXServer.exe` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases) e execute.
 
-Não precisa instalar .NET — o exe já tem tudo embutido.
+Não precisa instalar nada — o exe já tem tudo embutido.
 
-O servidor mostra o IP do PC e os monitores disponíveis.
+O servidor mostra o IP do PC na tela.
 
 **Liberar porta 8080 no Firewall** (só uma vez):
 ```powershell
@@ -43,43 +44,24 @@ New-NetFirewallRule -DisplayName "MirrorX" -Direction Inbound -Protocol TCP -Loc
 
 Baixe `MirrorX_v1.7.0.apk` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases), instale no tablet e abra.
 
-Digite o IP do PC e conecte. A tela do PC aparece no tablet.
+Digite o IP do PC e conecte.
 
-### 3. Testar
+### 3. Pronto
 
-Toque na tela do tablet → o mouse move no PC. Funciona como um touchpad/monitor.
-
----
-
-## Free vs Pro
-
-| Funcionalidade | Free | Pro (R$10) |
-|---|---|---|
-| Espelhamento de tela | ✅ | ✅ |
-| Toque → Mouse | ✅ | ✅ |
-| Cursor visível no tablet | ✅ | ✅ |
-| Reconexão automática | ✅ | ✅ |
-| FPS | Até 24 | 30 e 60 |
-| Modo Estender (VDD) | ❌ | ✅ |
-
-**Como desbloquear o Pro:**
-1. No app, toque em 🔒30Hz ou 🔒60Hz
-2. Digite o código: `MIRRORX-PRO-10`
-3. Desbloqueado pra sempre
+A tela do PC aparece no tablet. Toque na tela → mouse move no PC.
 
 ---
 
-## Modo Estender (2º Monitor Real)
+## Modo Estender (Pro)
 
-O tablet vira uma área de trabalho separada — dá pra arrastar janelas pra lá.
+O tablet vira um segundo monitor real — dá pra arrastar janelas pra lá.
 
-1. Instalar o VDD (Virtual Display Driver):
+1. Instalar o VDD:
 ```powershell
 winget install --id=VirtualDrivers.Virtual-Display-Driver -e
 ```
 2. Reiniciar o PC
 3. Win+I → Sistema → Tela → Estender monitores
-4. Configurar o servidor pro monitor virtual (requer Pro)
 
 ---
 
@@ -92,22 +74,9 @@ winget install --id=VirtualDrivers.Virtual-Display-Driver -e
 │  (.NET 8 + DXGI)     │  WebSocket :8080 │  (Kotlin + OkHttp)   │
 │                      │ ──frames JPEG──▶ │  → ImageView         │
 │  Cursor compositado  │ ◀──JSON toques───│  ← onTouchListener   │
-│  SendInput (mouse)   │                  │  ProManager (R$10)   │
+│  SendInput (mouse)   │                  │                      │
 └──────────────────────┘                  └──────────────────────┘
 ```
-
-- **Protocolo:** WebSocket binário (JPEG do PC → tablet) + JSON (`{"type":"down/move/up","x","y"}`) do tablet → PC
-- **Cursor:** Compositado no frame (resolve bug clássico do DXGI que entrega tela sem ponteiro)
-- **Toque:** Coordenadas normalizadas (0.0 a 1.0), servidor mapeia pra posição real
-
----
-
-## Stack Técnica
-
-- **Servidor PC:** C# .NET 8, Vortice.Windows (DXGI), Fleck (WebSocket), System.Drawing (JPEG)
-- **Cliente Android:** Kotlin, Jetpack Compose, OkHttp WebSocket
-- **Protocolo:** JPEG frames + JSON touch events
-- **Porta:** 8080
 
 ---
 
@@ -123,12 +92,11 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 ```bash
 cd android_source
 # Requer: JDK 17, Android SDK 34
-./gradlew assembleRelease
-# Assinar com apksigner
+./gradle-8.5/bin/gradle assembleRelease
 ```
 
 ---
 
 ## Licença
 
-MIT — livre para uso pessoal e comercial. Funcionalidades Pro requerem código de desbloqueio.
+MIT — livre para uso pessoal e comercial.
