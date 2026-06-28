@@ -28,6 +28,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mirrorx.app.BuildConfig
 import com.mirrorx.app.network.MirrorWebSocket
 import kotlin.math.abs
 
@@ -222,7 +223,7 @@ fun TouchpadView(
                     Box(Modifier.size(8.dp).clip(CircleShape).background(
                         if (isConnected) Color(0xFF10B981) else Color(0xFFEF4444)))
                     Spacer(Modifier.width(8.dp))
-                    Text("v1.9.1", color = Color(0xFFE8E8F0), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("v${BuildConfig.VERSION_NAME}", color = Color(0xFFE8E8F0), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -12,11 +12,11 @@ using System.Reflection;
 
 [assembly: System.Reflection.AssemblyCompanyAttribute("MirrorXServer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("1.7.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.7.0+1c478ae4966a7544af9bb673f0ebe3badb19b932")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.9.2.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.9.2+ff0afe491ac265249df031e6248121d6c1b54310")]
 [assembly: System.Reflection.AssemblyProductAttribute("MirrorXServer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MirrorXServer")]
-[assembly: System.Reflection.AssemblyVersionAttribute("1.7.0.0")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.9.2.0")]
 [assembly: System.Runtime.Versioning.TargetPlatformAttribute("Windows7.0")]
 [assembly: System.Runtime.Versioning.SupportedOSPlatformAttribute("Windows7.0")]
 

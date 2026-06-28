@@ -141,7 +141,7 @@ class Program
         // v1.8.6: GUI + servidor em threads separadas
         gui = new ServerForm();
         gui.Show();
-        gui.Log("Iniciando MirrorX Server v1.9.1...");
+        gui.Log("Iniciando MirrorX Server v1.9.2...");
 
         // Inicia o servidor numa thread dedicada (MTA para DXGI)
         var serverThread = new Thread(() => RunServer(gui)) {

@@ -126,7 +126,7 @@ class HermesServer:
     """WebSocket server that turns Android touch events into PC input."""
 
     DEFAULT_PORT = 9900
-    VERSION = "1.8.0"
+    VERSION = "1.9.3"
 
     def __init__(self, port: int = DEFAULT_PORT, host: str = "0.0.0.0"):
         self.host = host

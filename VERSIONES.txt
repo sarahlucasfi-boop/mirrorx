@@ -4,6 +4,26 @@
 ╚══════════════════════════════════════════════════════════════════╝
 
 ═══════════════════════════════════════════════════════════════════
+v1.9.2 — 28/06/2026
+═══════════════════════════════════════════════════════════════════
+  Sincronização Global & Correções Finais de Versão
+
+  APK Android:
+    ✅ Dinamização da versão exibida: agora lê de BuildConfig.VERSION_NAME
+       em vez de manter string estática "v1.9.1"
+    ✅ Versão APK atualizada para: 1.9.2 (versionCode 38)
+
+  Servidor C# (.exe):
+    ✅ Sincronizado e compilado com versão global 1.9.2
+    ✅ Splash/logs agora mostram corretamente "v1.9.2"
+
+  Arquivos entregues:
+    📱 MirrorX_v1.9.2.apk
+    🖥️ MirrorXServer_v1.9.2.exe
+    🖥️ MirrorXServer_v1.9.2_SelfContained.exe
+
+
+═══════════════════════════════════════════════════════════════════
 v1.9.1 — 28/06/2026
 ═══════════════════════════════════════════════════════════════════
   Touchpad de Tela Cheia + Janela de Configuração Azul

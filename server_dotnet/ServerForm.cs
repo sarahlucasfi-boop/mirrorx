@@ -6,7 +6,7 @@ namespace MirrorXServer;
 
 public class ServerForm : Form
 {
-    // v1.9.1 — Janela de configuração com fundo AZUL (diferenciação visual do APK)
+    // v1.9.2 — Janela de configuração com fundo AZUL (diferenciação visual do APK)
     static readonly Color BG    = Color.FromArgb(10, 28, 80);      // azul escuro profundo
     static readonly Color CARD  = Color.FromArgb(18, 42, 110);     // azul médio (cards)
     static readonly Color CARD2 = Color.FromArgb(26, 56, 138);     // azul mais claro (inner)
@@ -39,7 +39,7 @@ public class ServerForm : Form
 
     public ServerForm()
     {
-        Text = "MirrorX Server v1.9.1";
+        Text = "MirrorX Server v1.9.2";
         Size = new Size(520, 800);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = BG;
@@ -62,7 +62,7 @@ public class ServerForm : Form
         y += 40;
 
         var sub = new Label {
-            Text = "v1.9.1 \u2022 Touchpad de Tela Cheia",
+            Text = "v1.9.2 \u2022 Touchpad de Tela Cheia",
             Font = new Font("Segoe UI", 9),
             ForeColor = DIM,
             Location = new Point(16, y),
@@ -221,7 +221,7 @@ public class ServerForm : Form
         btnPanel.Controls.Add(btnStop);
 
         lblVersion = new Label {
-            Text = "v1.9.1",
+            Text = "v1.9.2",
             Font = new Font("Segoe UI", 8),
             ForeColor = DIM,
             Anchor = AnchorStyles.Bottom | AnchorStyles.Right,

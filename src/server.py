@@ -38,7 +38,7 @@ from typing import Callable, Optional, Set, List
 
 log = logging.getLogger("mirrorx")
 
-VERSION = "1.8.0"
+VERSION = "1.9.3"
 DEFAULT_PORT = 9900
 
 

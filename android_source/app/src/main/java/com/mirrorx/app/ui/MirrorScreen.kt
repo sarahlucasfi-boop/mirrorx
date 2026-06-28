@@ -561,6 +561,7 @@ private fun MirrorContent(
                                     while (true) {
                                         val event = awaitPointerEvent()
                                         val change = event.changes.firstOrNull() ?: continue
+                                        if (change.isConsumed) continue
                                         val action = when {
                                             !change.previousPressed && change.pressed ->
                                                 MotionEvent.ACTION_DOWN
