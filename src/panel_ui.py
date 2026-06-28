@@ -175,7 +175,7 @@ class ControlPanel:
         port: int,
         host: str,
         on_stop: Callable[[], None],
-        version: str = "1.6.7",
+        version: str = "1.8.0",
     ):
         self.mode = mode            # "mirror" or "hermes"
         self.server = server_obj
@@ -322,6 +322,38 @@ class ControlPanel:
         card = CardFrame(self._scroll, "STREAM", accent=MIRROR_TINT)
         card.pack(fill="x", padx=18, pady=4)
 
+        # v1.7.0: Monitor selector
+        monitors = []
+        if hasattr(self.server, "get_monitors"):
+            monitors = self.server.get_monitors()
+        if not monitors:
+            monitors = [{"idx": 0, "name": "Monitor 1 (Principal)", "w": 1920, "h": 1080}]
+
+        ctk.CTkLabel(card.body, text="Monitor",
+                     font=("Segoe UI", 10), text_color=FG_DIM,
+                     anchor="w").pack(fill="x", pady=(2, 0))
+
+        mon_names = [m["name"] for m in monitors]
+        current_idx = getattr(self.server, "monitor_idx", 0)
+        default_mon = mon_names[current_idx] if current_idx < len(mon_names) else mon_names[0]
+
+        self._mon_var = tk.StringVar(value=default_mon)
+        self._mon_menu = ctk.CTkOptionMenu(
+            card.body,
+            variable=self._mon_var,
+            values=mon_names,
+            command=self._on_monitor_change,
+            font=("Segoe UI", 11),
+            fg_color=BG_INPUT,
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOT,
+            dropdown_fg_color=BG_CARD2,
+            dropdown_hover_color=ACCENT,
+            width=200, height=28,
+        )
+        self._mon_menu.pack(fill="x", pady=(2, 8))
+        self._monitors = monitors
+
         # FPS row (segmented: 15 / 24 / 30 / 45 / 60 / 90)
         ctk.CTkLabel(card.body, text="FPS",
                      font=("Segoe UI", 10), text_color=FG_DIM,
@@ -439,6 +471,7 @@ class ControlPanel:
         self._stats_card_body = card.body
 
         if self.mode == "mirror":
+            self._s_monitor  = StatRow(card.body, "Monitor", "—")
             self._s_fps      = StatRow(card.body, "FPS", "—")
             self._s_clients  = StatRow(card.body, "Clientes", "0")
             self._s_screen   = StatRow(card.body, "Tela", "—")
@@ -447,7 +480,7 @@ class ControlPanel:
             self._s_banda    = StatRow(card.body, "Banda", "—")
             self._s_cursor   = StatRow(card.body, "Cursor", "—")
             self._s_mode     = StatRow(card.body, "Encoder", "—")
-            for w in (self._s_fps, self._s_clients, self._s_screen,
+            for w in (self._s_monitor, self._s_fps, self._s_clients, self._s_screen,
                       self._s_stream, self._s_frame, self._s_banda,
                       self._s_cursor, self._s_mode):
                 w.pack(fill="x", pady=1)
@@ -580,6 +613,15 @@ class ControlPanel:
         self._s_fps.set_value(f"{fps:.1f}", fps_color)
         self._s_clients.set_value(str(clients := st.get("clients", 0)))
 
+        # v1.7.0: show current monitor name
+        mon_idx = st.get("monitor_idx", 0)
+        monitors = st.get("monitors", [])
+        if monitors and mon_idx < len(monitors):
+            mon_name = monitors[mon_idx].get("name", f"Monitor {mon_idx + 1}")
+        else:
+            mon_name = f"Monitor {mon_idx + 1}"
+        self._s_monitor.set_value(mon_name)
+
         sw, sh = st.get("screen_size") or (0, 0)
         self._s_screen.set_value(f"{sw}×{sh}")
 
@@ -614,6 +656,18 @@ class ControlPanel:
         self._s_errors.set_value(str(err), BAD if err > 0 else FG_BRIGHT)
 
     # ── Settings callbacks (mirror) ───────────────────────────────────
+    def _on_monitor_change(self, selected_name):
+        """v1.7.0: Switch capture to the selected monitor."""
+        for m in self._monitors:
+            if m["name"] == selected_name:
+                if hasattr(self.server, "set_monitor"):
+                    self.server.set_monitor(m["idx"])
+                    self.log_event(f"Monitor → {selected_name}", "ok")
+                    # Re-init capture for the new monitor
+                    if hasattr(self.server, "_init_capture"):
+                        self.server._init_capture()
+                break
+
     def _on_fps_change(self, opt):
         if hasattr(self.server, "target_fps"):
             self.server.target_fps = int(opt)

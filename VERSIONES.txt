@@ -18,71 +18,85 @@ v1.0.0 — 16/06/2026
     ✅ Tema dark profissional (#0A0A0B + #6366F1)
     ✅ Qualidade dinâmica auto-ajustável
     ✅ Escala configurável (25% a 100%)
-    ✅ Touch input (código pronto, desativado)
     ✅ Teclas de atalho (Esc, Win, Tab, Enter, Space)
-    ✅ Ícone do aplicativo (.ico + mipmap Android)
-    ✅ Aspect ratio preservado (letterbox)
-
-  Otimizações de performance:
-    ✅ JPEG encoding via OpenCV (cv2.imencode) — 5-10x mais rápido
-    ✅ Resize via cv2.resize (INTER_AREA) — mais rápido que Pillow
-    ✅ Huffman optimization desativada (encode mais rápido)
-    ✅ createImageBitmap() no cliente (hardware-accelerated)
-    ✅ Qualidade dinâmica baseada em FPS
-
-  Arquivos:
-    - MirrorX.exe (Windows, ~72 MB)
-    - MirrorX_v1.0.apk (Android, ~5.5 MB, assinado)
-    - server.py (fonte Python)
-    - client/index.html (cliente web)
-    - landing.html (GitHub Pages)
 
 ═══════════════════════════════════════════════════════════════════
-v1.1.0 — PLANEJADO
+v1.6.0 — 18/06/2026
 ═══════════════════════════════════════════════════════════════════
-  Touch Input
+  Migração e Código Fonte Completo
 
-  Planejado:
-    ⬜ Ativar TouchHandler.kt (código já pronto)
-    ⬜ Modos: Move / Click / Draw
-    ⬜ Barra de ferramentas com teclas de atalho
-    ⬜ Reconexão automática
-    ⬜ Suporte a gestos (pinch-to-zoom, scroll)
+  Funcionalidades:
+    ✅ Organização da estrutura de diretórios do repositório
+    ✅ Inclusão do código fonte do app Android nativo (com Gradle 8.5)
+    ✅ Distribuição do primeiro APK estável gerado via CI/CD local
 
 ═══════════════════════════════════════════════════════════════════
-v1.2.0 — PLANEJADO
+v1.7.0 — 20/06/2026
 ═══════════════════════════════════════════════════════════════════
-  Driver Virtual + 60 FPS
+  Protocolo de Toque Simplificado & Suporte Multi-Monitor
 
-  Planejado:
-    ⬜ Driver virtual de vídeo (monitor extra real no Windows)
-    ⬜ 60 FPS (otimização de pipeline)
-    ⬜ Stylus pressure sensitivity
-    ⬜ Multi-monitor (selecionar qual monitor espelhar)
-    ⬜ H.264 via NVENC (hardware encoding)
-
-═══════════════════════════════════════════════════════════════════
-v1.3.0 — PLANEJADO
-═══════════════════════════════════════════════════════════════════
-  Premium + Distribuição
-
-  Planejado:
-    ⬜ Conexão USB (menor latência)
-    ⬜ Sistema de licença Premium (chave de ativação)
-    ⬜ Sign do APK (Google Play)
-    ⬜ Code signing do .exe (certificado EV)
-    ⬜ Atualizações automáticas
+  Funcionalidades:
+    ✅ Implementação de protocolo de toque otimizado (down/move/up)
+    ✅ Suporte preliminar a múltiplos monitores (Windows)
+    ✅ Gestos de rolagem (scroll) e zoom tátil no cliente Android
+    ✅ Controle de mouse absoluto e relativo integrado
 
 ═══════════════════════════════════════════════════════════════════
-NOTAS DE RELEASE
+v1.8.0 — 21/06/2026
 ═══════════════════════════════════════════════════════════════════
+  Reescrita do Servidor em C# .NET
 
-v1.0.0:
-  - Free tier: 30 FPS, touch básico, single monitor, open source
-  - Premium tier (R$22 vitalício): recursos futuros (v1.2+)
-  - Distribuição: GitHub Releases (.exe + .apk)
-  - Landing page: GitHub Pages
+  Funcionalidades:
+    ✅ Servidor reescrito de Python para C# (WinForms + .NET 8)
+    ✅ Servidor WebSocket Fleck integrado de alta performance
+    ✅ Captura de tela nativa ultra-rápida via DXGI (Vortice.Direct3D11)
+    ✅ Redução drástica do uso de CPU e latência no Windows
 
 ═══════════════════════════════════════════════════════════════════
-Última atualização: 16/06/2026 23:30
+v1.8.1 — 23/06/2026
+═══════════════════════════════════════════════════════════════════
+  Configurações Persistentes
+
+  Funcionalidades:
+    ✅ Porta do servidor agora configurável (padrão 8080)
+    ✅ Persistência do último IP e porta digitados (SharedPreferences)
+    ✅ Otimização de uso de memória no tratamento de Bitmaps no Android
+
+═══════════════════════════════════════════════════════════════════
+v1.8.7 — 25/06/2026
+═══════════════════════════════════════════════════════════════════
+  Modo Hermes Integrado (Touchpad Puro) & Interface Dark no C#
+
+  Funcionalidades:
+    ✅ Modo "Touchpad Puro" (Hermes) embutido no APK (latência ~20ms, sem vídeo)
+    ✅ Seletor de Aceleração por Hardware (Auto / GPU / CPU) para decode JPEG
+    ✅ Painel visual de Gestos e instruções táteis integrado
+    ✅ Novo visual Dark UI moderno para o Servidor WinForms
+    ✅ Controle deslizante de escala e qualidade dinâmica no servidor
+
+═══════════════════════════════════════════════════════════════════
+v1.8.9 — 28/06/2026
+═══════════════════════════════════════════════════════════════════
+  Auto-Elevação & Descoberta Automática de Rede (UDP)
+
+  Funcionalidades:
+    ✅ Elevação de privilégio automática (Administrator) no EXE do servidor
+    ✅ Descoberta automática de servidores na rede local via UDP Broadcast
+    ✅ Controle deslizante na interface do servidor para qualidade e escala em tempo real
+    ✅ Ajustes de layout no diálogo de configurações do app Android
+
+═══════════════════════════════════════════════════════════════════
+v1.9.0 — 28/06/2026 (Atual de Produção)
+═══════════════════════════════════════════════════════════════════
+  Correção de Crash de Inicialização no Emulador (BlueStacks) & Otimizações
+
+  Funcionalidades:
+    ✅ Corrigido o travamento instantâneo do APK ao abrir em emuladores
+    ✅ Corrigido loop infinito de conexões WebSocket no modo Touchpad Puro
+    ✅ Removidas chamadas inseguras de descarte de Bitmaps no Android (Bitmap.recycle)
+    ✅ Sincronização completa de código fonte entre repositórios locais
+    ✅ Automação de compilação, assinatura e deploy simultâneo (.APK e .EXE)
+
+═══════════════════════════════════════════════════════════════════
+Última atualização: 28/06/2026 12:15
 ═══════════════════════════════════════════════════════════════════

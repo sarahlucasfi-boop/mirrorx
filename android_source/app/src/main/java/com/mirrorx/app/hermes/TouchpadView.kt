@@ -25,22 +25,20 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mirrorx.app.licensing.ProManager
 import com.mirrorx.app.network.MirrorWebSocket
 import kotlin.math.abs
 import kotlin.math.hypot
 
 /**
- * v1.7.0 Hybrid Hermes — configs consolidadas (tudo na tela principal).
+ * v1.6.6 Hybrid Hermes — configs consolidadas (tudo na tela principal).
  *
  * Layout unificado sem modal de configurações separado:
  *
  *  ┌─────────────────────────────────────────────────────┐
- *  │ ● v1.7.0 [PRO/FREE]  60Hz  30Hz  15Hz    NORMAL  ⚙│ ← status + mode chips
+ *  │ ● v1.6.6  60Hz  30Hz  15Hz    NORMAL  ⚙            │ ← status + mode chips
  *  ├─────────────────────────────────────────────────────┤
  *  │                     PC SCREEN                       │
  *  │                       ...                           │
@@ -63,14 +61,7 @@ fun TouchpadView(
     val remoteCursor by client.remoteCursor.collectAsState()
     val latencyMs by client.latencyMs.collectAsState()
     val cursorVisible by client.cursorVisible.collectAsState()
-
-    // Pro/Free licensing
-    val context = LocalContext.current
-    var isPro by remember { mutableStateOf(ProManager.isPro(context)) }
-    LaunchedEffect(isPro) { client.maxFps = if (isPro) 60 else 24 }
-    var showUnlockDialog by remember { mutableStateOf(false) }
-    var unlockCode by remember { mutableStateOf("") }
-    var unlockError by remember { mutableStateOf(false) }
+    val actualFps by client.fps.collectAsState()  // v1.8.1: real FPS from server
 
     var serverMode by remember { mutableIntStateOf(0) }
     var mirrorQuality by remember { mutableIntStateOf(75) }
@@ -139,76 +130,20 @@ fun TouchpadView(
                     Box(Modifier.size(8.dp).clip(CircleShape).background(
                         if (isConnected) Color(0xFF10B981) else Color(0xFFEF4444)))
                     Spacer(Modifier.width(8.dp))
-                    Text("v1.7.0", color = Color(0xFFE8E8F0), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (isPro) "PRO" else "FREE",
-                        color = if (isPro) Color(0xFF10B981) else Color(0xFFF59E0B),
-                        fontWeight = FontWeight.Bold, fontSize = 10.sp,
-                        modifier = Modifier
-                            .background(if (isPro) Color(0xFF10B981).copy(alpha=0.15f) else Color(0xFFF59E0B).copy(alpha=0.15f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
-                    )
+                    Text("v1.8.0", color = Color(0xFFE8E8F0), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
 
                 // Mode rate chips (consolidated in top bar)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (isPro) {
-                        RateChip("60Hz", 0, serverMode) { serverMode = 0; client.sendHermesQuality(0) }
-                        RateChip("30Hz", 1, serverMode) { serverMode = 1; client.sendHermesQuality(1) }
-                        RateChip("15Hz", 2, serverMode) { serverMode = 2; client.sendHermesQuality(2) }
-                    } else {
-                        RateChip("\uD83D\uDD12 30Hz", -1, -1) { showUnlockDialog = true }
-                        RateChip("\uD83D\uDD12 60Hz", -1, -1) { showUnlockDialog = true }
-                        RateChip("24Hz", 2, serverMode) { serverMode = 2; client.sendHermesQuality(2) }
-                    }
+                    RateChip("60Hz", 0, serverMode) { serverMode = 0; client.sendHermesQuality(0) }
+                    RateChip("30Hz", 1, serverMode) { serverMode = 1; client.sendHermesQuality(1) }
+                    RateChip("15Hz", 2, serverMode) { serverMode = 2; client.sendHermesQuality(2) }
                 }
 
                 // PING
                 val latCol = when { latencyMs < 50 -> Color(0xFF10B981); latencyMs < 120 -> Color(0xFFF59E0B); else -> Color(0xFFEF4444) }
                 Text("${latencyMs}ms", color = latCol, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
-        }
-
-        // Unlock dialog
-        if (showUnlockDialog) {
-            AlertDialog(
-                onDismissRequest = { showUnlockDialog = false; unlockError = false },
-                title = { Text("Desbloquear Pro", color = Color.White) },
-                text = {
-                    Column {
-                        Text("Desbloqueie 30fps e 60fps por R\$10", color = Color(0xFFB0B0C0), fontSize = 13.sp)
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = unlockCode,
-                            onValueChange = { unlockCode = it; unlockError = false },
-                            label = { Text("Código de desbloqueio") },
-                            isError = unlockError,
-                            singleLine = true
-                        )
-                        if (unlockError) {
-                            Text("Código inválido", color = Color(0xFFEF4444), fontSize = 11.sp)
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (ProManager.unlock(context, unlockCode)) {
-                            isPro = true
-                            showUnlockDialog = false
-                            client.maxFps = 60
-                        } else {
-                            unlockError = true
-                        }
-                    }) { Text("Desbloquear", color = Color(0xFF10B981)) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showUnlockDialog = false; unlockError = false }) {
-                        Text("Cancelar", color = Color(0xFFB0B0C0))
-                    }
-                },
-                containerColor = Color(0xFF1A1A24)
-            )
         }
 
         // BOTTOM CONTROL STRIP (consolidated — sliders visible, no modal needed)
@@ -289,7 +224,7 @@ fun TouchpadView(
                     ScaleChip("75%", 0.75f, mirrorScale, { mirrorScale = 0.75f; client.sendMirrorConfig("scale", 0.75f) })
                     ScaleChip("100%", 1.00f, mirrorScale, { mirrorScale = 1.00f; client.sendMirrorConfig("scale", 1.00f) })
                     Spacer(Modifier.weight(1f))
-                    Text("FPS: 30", color = Color(0xFF6E6E80), fontSize = 9.sp)
+                    Text("FPS: $actualFps", color = Color(0xFF6E6E80), fontSize = 9.sp)  // v1.8.1: real FPS
                 }
             }
         }

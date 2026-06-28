@@ -188,7 +188,7 @@ def _coerce_int(value) -> int:
 # ---------------------------------------------------------------------------
 # Response builders (PC → Android)
 # ---------------------------------------------------------------------------
-def hello_msg(version: str = "1.5.0", mode: str = "hermes") -> str:
+def hello_msg(version: str = "1.7.2", mode: str = "hermes") -> str:
     return json.dumps({"type": "hello", "version": version, "mode": mode})
 
 

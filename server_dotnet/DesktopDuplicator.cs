@@ -8,7 +8,7 @@ using MapFlags = Vortice.Direct3D11.MapFlags;
 
 namespace MirrorXServer;
 
-class DesktopDuplicator
+class DesktopDuplicator : IDisposable
 {
     readonly ID3D11Device device;
     readonly ID3D11DeviceContext ctx;
@@ -21,6 +21,11 @@ class DesktopDuplicator
     OutduplPointerShapeInfo cursorInfo;
     int cursorX, cursorY;
     bool cursorVisible;
+
+    // v1.7.3: expose cursor state so the caller can build the 11-byte frame header
+    public int CursorX => cursorX;
+    public int CursorY => cursorY;
+    public bool CursorVisible => cursorVisible;
 
     static IDXGIAdapter GetAdapter(ID3D11Device d)
     {
@@ -64,6 +69,7 @@ class DesktopDuplicator
         using var output1 = output!.QueryInterface<IDXGIOutput1>();
 
         var d = output.Description.DesktopCoordinates;
+        output.Dispose();  // v1.8.1: dispose original COM ref AFTER reading Description
         Bounds = new Rectangle(d.Left, d.Top, d.Right - d.Left, d.Bottom - d.Top);
         width = Bounds.Width; height = Bounds.Height;
 
@@ -86,7 +92,7 @@ class DesktopDuplicator
         IDXGIResource? res = null;
         try
         {
-            var r = dup.AcquireNextFrame(100u, out OutduplFrameInfo info, out res);
+            var r = dup.AcquireNextFrame(33u, out OutduplFrameInfo info, out res);  // v1.8.0: 33ms = 30fps aligned
             if (r.Failure) return null;
 
             if (info.LastMouseUpdateTime > 0)
@@ -99,12 +105,15 @@ class DesktopDuplicator
             {
                 cursorShape = new byte[info.PointerShapeBufferSize];
                 var h = GCHandle.Alloc(cursorShape, GCHandleType.Pinned);
-                dup.GetFramePointerShape(
-                    (uint)cursorShape.Length,
-                    h.AddrOfPinnedObject(),
-                    out _,
-                    out cursorInfo);
-                h.Free();
+                try
+                {
+                    dup.GetFramePointerShape(
+                        (uint)cursorShape.Length,
+                        h.AddrOfPinnedObject(),
+                        out _,
+                        out cursorInfo);
+                }
+                finally { h.Free(); }  // v1.8.0: always free handle even on exception
             }
 
             using var tex = res.QueryInterface<ID3D11Texture2D>();
@@ -131,6 +140,15 @@ class DesktopDuplicator
             res?.Dispose();
             try { dup.ReleaseFrame(); } catch { }
         }
+    }
+
+    // v1.8.0: IDisposable — release all COM objects properly
+    public void Dispose()
+    {
+        try { dup?.Dispose(); } catch { }
+        try { staging?.Dispose(); } catch { }
+        try { ctx?.Dispose(); } catch { }
+        try { device?.Dispose(); } catch { }
     }
 
     void DrawCursor(Bitmap bmp)

@@ -38,7 +38,7 @@ from typing import Callable, Optional, Set, List
 
 log = logging.getLogger("mirrorx")
 
-VERSION = "1.6.7"
+VERSION = "1.8.0"
 DEFAULT_PORT = 9900
 
 
@@ -88,6 +88,10 @@ class MirrorMode:
         self._capture = None
         self._encoder = None
         self._screen_size = None
+        # v1.7.0: multi-monitor support
+        self.monitor_idx = 0  # index into self._monitors list
+        self._monitors = []   # list of {"idx": int, "name": str, "w": int, "h": int, "left": int, "top": int}
+        self._monitor_bounds = (0, 0, 1920, 1080)  # (left, top, w, h)
         # Settings
         self.scale = self.DEFAULTS["scale"]
         self.quality = self.DEFAULTS["quality"]
@@ -102,6 +106,64 @@ class MirrorMode:
             "touches": 0,
             "started_at": time.time(),
         }
+
+    # ------------------------------------------------------------------
+    # v1.7.0: Multi-monitor support
+    # ------------------------------------------------------------------
+    def list_monitors(self) -> list:
+        """Detect available monitors. Returns list of dicts with idx, name, w, h, left, top."""
+        monitors = []
+        try:
+            import mss
+            with mss.mss() as sct:
+                for i, m in enumerate(sct.monitors):
+                    if i == 0:
+                        continue  # skip the virtual "all-in-one" monitor
+                    monitors.append({
+                        "idx": i - 1,  # 0-based user-facing index
+                        "mss_idx": i,  # mss internal index (1-based)
+                        "name": f"Monitor {i}" + (f" ({m['width']}x{m['height']})" if i > 1 else " (Principal)"),
+                        "w": m["width"],
+                        "h": m["height"],
+                        "left": m["left"],
+                        "top": m["top"],
+                    })
+        except Exception as e:
+            log.debug("[Mirror] mss monitor detection failed: %s", e)
+            monitors.append({
+                "idx": 0,
+                "mss_idx": 1,
+                "name": "Monitor 1 (Principal)",
+                "w": 1920,
+                "h": 1080,
+                "left": 0,
+                "top": 0,
+            })
+        self._monitors = monitors
+        if not monitors:
+            monitors = [{"idx": 0, "mss_idx": 1, "name": "Monitor 1 (Principal)",
+                         "w": 1920, "h": 1080, "left": 0, "top": 0}]
+            self._monitors = monitors
+        return monitors
+
+    def set_monitor(self, idx: int):
+        """Switch the capture target to monitor at index `idx`."""
+        if not self._monitors:
+            self.list_monitors()
+        if idx < 0 or idx >= len(self._monitors):
+            log.warning("[Mirror] invalid monitor index %d (have %d)", idx, len(self._monitors))
+            return
+        self.monitor_idx = idx
+        mon = self._monitors[idx]
+        self._monitor_bounds = (mon["left"], mon["top"], mon["w"], mon["h"])
+        self._screen_size = (mon["w"], mon["h"])
+        log.info("[Mirror] switched to %s (%dx%d)", mon["name"], mon["w"], mon["h"])
+
+    def get_monitors(self) -> list:
+        """Return cached monitor list (calls list_monitors if empty)."""
+        if not self._monitors:
+            self.list_monitors()
+        return self._monitors
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -125,7 +187,7 @@ class MirrorMode:
         import websockets
         async with websockets.serve(
             self._on_client, self.host, self.port,
-            max_size=10_000, ping_interval=15, ping_timeout=30,
+            max_size=1_048_576, ping_interval=15, ping_timeout=30,
         ):
             self.running = True
             log.info("[Mirror] listening — %dx%d @ scale %.2f q=%d",
@@ -162,27 +224,42 @@ class MirrorMode:
     # Capture / encoder init
     # ------------------------------------------------------------------
     def _init_capture(self):
-        """Try dxcam → mss → PIL.ImageGrab in that order."""
+        """Try dxcam → mss → PIL.ImageGrab in that order.
+        v1.7.0: detects all monitors and sets capture to monitor_idx."""
+        # v1.7.0: detect all monitors first
+        self.list_monitors()
+        target_idx = min(self.monitor_idx, max(0, len(self._monitors) - 1))
+        self.monitor_idx = target_idx
+
         try:
             import dxcam
-            cap = dxcam.create()
+            # dxcam can target a specific monitor by index
+            cap = dxcam.create(output_idx=target_idx)
             frame = cap.grab()
             if frame is not None:
                 self._capture = ("dxcam", cap)
                 self._screen_size = (frame.shape[1], frame.shape[0])  # (W, H)
-                log.info("[Mirror] using dxcam capture")
+                if self._monitors:
+                    mon = self._monitors[target_idx]
+                    self._monitor_bounds = (mon["left"], mon["top"], mon["w"], mon["h"])
+                log.info("[Mirror] using dxcam capture (monitor %d)", target_idx)
                 return
         except Exception as e:
             log.debug("[Mirror] dxcam not available: %s", e)
         try:
             import mss
-            with mss.mss() as sct:
-                m = sct.monitors[1]  # primary
-                self._capture = ("mss", mss.mss())
-                self._screen_size = (m["width"], m["height"])
-                log.info("[Mirror] using mss capture (%dx%d)",
-                         m["width"], m["height"])
-                return
+            sct = mss.mss()
+            mss_idx = target_idx + 1  # mss uses 1-based index (0 = virtual)
+            if mss_idx < len(sct.monitors):
+                m = sct.monitors[mss_idx]
+            else:
+                m = sct.monitors[1]  # fallback to primary
+            self._capture = ("mss", sct)
+            self._screen_size = (m["width"], m["height"])
+            self._monitor_bounds = (m["left"], m["top"], m["width"], m["height"])
+            log.info("[Mirror] using mss capture monitor %d (%dx%d)",
+                     mss_idx, m["width"], m["height"])
+            return
         except Exception as e:
             log.debug("[Mirror] mss not available: %s", e)
         try:
@@ -190,7 +267,7 @@ class MirrorMode:
             img = ImageGrab.grab()
             self._capture = ("pil", ImageGrab)
             self._screen_size = img.size  # (W, H)
-            log.info("[Mirror] using PIL.ImageGrab")
+            log.info("[Mirror] using PIL.ImageGrab (single monitor only)")
         except Exception as e:
             log.error("[Mirror] no capture backend available: %s", e)
             self._screen_size = (1920, 1080)  # last-resort default
@@ -223,6 +300,7 @@ class MirrorMode:
         
         v1.6.0: returns None on any capture exception (instead of
         crashing the broadcast loop) so the supervisor can recover.
+        v1.7.0: captures from the selected monitor (self.monitor_idx).
         """
         try:
             import cv2
@@ -233,8 +311,13 @@ class MirrorMode:
                 if arr is None:
                     return None
             elif backend == "mss":
+                mss_idx = self.monitor_idx + 1  # 1-based
                 with cap as sct:
-                    m = sct.monitors[1]
+                    monitors = sct.monitors
+                    if mss_idx < len(monitors):
+                        m = monitors[mss_idx]
+                    else:
+                        m = monitors[1]  # fallback primary
                     img = sct.grab(m)
                     arr = np.frombuffer(img.rgb, dtype=np.uint8).reshape(
                         img.height, img.width, 3)
@@ -307,7 +390,8 @@ class MirrorMode:
                     continue
                 # 11-byte frame header (v1.2): type(1) + jpeg_len(4)
                 # + mouse_x(2) + mouse_y(2) + cursor_visible(1) + reserved(1)
-                mx, my, cur_vis = self._get_cursor_state()
+                # v1.8: reserved byte now carries in_bounds flag
+                mx, my, cur_vis, in_bounds = self._get_cursor_state()
                 mx = max(0, min(65535, int(mx)))
                 my = max(0, min(65535, int(my)))
                 header = struct.pack(">BIHHBB",
@@ -315,7 +399,7 @@ class MirrorMode:
                                      len(jpeg),
                                      mx, my,
                                      1 if cur_vis else 0,
-                                     0)
+                                     1 if in_bounds else 0)
                 # Pack into one binary frame
                 payload = header + jpeg
                 if self.clients:
@@ -347,14 +431,21 @@ class MirrorMode:
         # overlay always draws the PC cursor. The server has no way to
         # know whether a stylus is being used — that's a tablet-side
         # decision. Force it ON.
+        # v1.7.0: return cursor position relative to the selected monitor.
+        # v1.8: return in_bounds flag so client hides cursor when outside monitor.
         try:
             import pyautogui
             x, y = pyautogui.position()
-            return (min(65535, max(0, int(x))),
-                    min(65535, max(0, int(y))),
-                    True)
+            # Convert absolute screen coords to monitor-relative coords
+            left, top, mw, mh = self._monitor_bounds
+            rel_x = x - left
+            rel_y = y - top
+            in_bounds = (0 <= rel_x < mw and 0 <= rel_y < mh)
+            return (max(0, min(65535, int(rel_x))),
+                    max(0, min(65535, int(rel_y))),
+                    True, in_bounds)
         except Exception:
-            return (0, 0, True)  # even on error, say visible
+            return (0, 0, True, False)  # on error, don't show cursor
 
     async def _safe_send(self, ws, payload):
         try:
@@ -375,6 +466,10 @@ class MirrorMode:
         self.clients.add(ws)
         # Send a one-time hello + screen info
         try:
+            monitors_list = [
+                {"idx": m["idx"], "name": m["name"], "w": m["w"], "h": m["h"]}
+                for m in self._monitors
+            ]
             await ws.send(json.dumps({
                 "type": "hello",
                 "version": VERSION,
@@ -386,6 +481,8 @@ class MirrorMode:
                     "quality": self.quality,
                     "target_fps": self.target_fps,
                 },
+                "monitors": monitors_list,
+                "monitor_idx": self.monitor_idx,
             }))
         except Exception:
             pass
@@ -459,6 +556,28 @@ class MirrorMode:
                 log.info("[Mirror] config auto_adjust=%s", self.auto_adjust)
             elif key == "encoder":
                 log.info("[Mirror] config encoder=%s (no-op, auto-selected)", val)
+            elif key == "monitor":
+                # v1.7.0: switch monitor from client
+                new_idx = int(val)
+                self.set_monitor(new_idx)
+                log.info("[Mirror] config monitor=%d", new_idx)
+                # Re-init capture for the new monitor
+                self._init_capture()
+                # Notify all clients about the screen change
+                mon = self._monitors[new_idx] if new_idx < len(self._monitors) else None
+                if mon:
+                    info_msg = json.dumps({
+                        "type": "screen_update",
+                        "width": mon["w"],
+                        "height": mon["h"],
+                        "monitor_idx": new_idx,
+                    })
+                    import asyncio
+                    for c in list(self.clients):
+                        try:
+                            asyncio.get_event_loop().create_task(self._safe_send(c, info_msg))
+                        except Exception:
+                            pass
             return
         if t == "click_request":
             await asyncio.to_thread(self._do_click_request, obj.get("button", "left"))
@@ -693,6 +812,33 @@ def _get_local_ip():
         return "127.0.0.1"
 
 
+def _ensure_firewall_rule():
+    """Ensure port 9900 is open in Windows Defender Firewall."""
+    if sys.platform != "win32":
+        return
+    try:
+        import subprocess
+        # Check if the rule already exists
+        res = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule", "name=MirrorX Port 9900"],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if "no rules match" in res.stdout.lower() or res.returncode != 0:
+            # Rule does not exist, let's add it
+            subprocess.run(
+                ["netsh", "advfirewall", "firewall", "add", "rule",
+                 "name=MirrorX Port 9900", "dir=in", "action=allow",
+                 "protocol=TCP", "localport=9900"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            log.info("Added Windows Firewall rule for port 9900")
+    except Exception as e:
+        log.debug("Failed to check/add Windows Firewall rule: %s", e)
+
+
 def _mirror_snapshot(mirror) -> dict:
     """Build a stats dict for the v1.5.2 control panel from MirrorMode."""
     st = mirror.stats or {}
@@ -716,6 +862,8 @@ def _mirror_snapshot(mirror) -> dict:
         "bandwidth_bps": float(bandwidth_bps),
         "cursor": cursor,
         "encoder": getattr(mirror, "_encoder_name", "—"),
+        "monitor_idx": mirror.monitor_idx,
+        "monitors": mirror.get_monitors(),
     }
 
 
@@ -820,7 +968,7 @@ def run_panel(mirror: MirrorMode, port: int):
     # ── Header ──
     ttk.Label(root, text=f"MirrorX v{VERSION}", style="Header.TLabel").pack(
         pady=(12, 2))
-    ttk.Label(root, text=f"Mode: mirror (v1.4.3 fallback)",
+    ttk.Label(root, text=f"Mode: mirror (v{VERSION} fallback)",
               style="Subheader.TLabel").pack()
 
     local_ip = _get_local_ip()
@@ -977,10 +1125,11 @@ def run_panel(mirror: MirrorMode, port: int):
 def main():
     args = parse_args()
     setup_logging()
+    _ensure_firewall_rule()
 
     print("=" * 60)
     print(f"  MirrorX v{VERSION} — "
-          f"{'Hermes (mouse-only)' if args.hermes else 'Mirror (v1.4.3)'}")
+          f"{'Hermes (mouse-only)' if args.hermes else f'Mirror (v{VERSION})'}")
     print(f"  Listening on ws://{args.host}:{args.port}/")
     print("=" * 60)
 
@@ -997,7 +1146,7 @@ def main():
                 port=args.port, host=args.host,
                 on_stop=lambda: setattr(hermes, "_stop_requested", True),
             )
-            panel.log_event("MirrorX v1.5.2 — Hermes pronto", "ok")
+            panel.log_event(f"MirrorX v{VERSION} — Hermes pronto", "ok")
             panel.log_event(f"WebSocket escutando em :{args.port}", "info")
             # Start the asyncio WS server in a daemon thread.
             import threading
@@ -1041,7 +1190,7 @@ def main():
             port=args.port, host=args.host,
             on_stop=lambda: setattr(mirror, "running", False),
         )
-        panel.log_event("MirrorX v1.5.2 — Mirror pronto", "ok")
+        panel.log_event(f"MirrorX v{VERSION} — Mirror pronto", "ok")
         panel.log_event(f"WebSocket escutando em :{args.port}", "info")
         import threading
 

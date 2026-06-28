@@ -11,20 +11,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -47,8 +41,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.mirrorx.app.BuildConfig
-import com.mirrorx.app.HermesActivity
+import com.mirrorx.app.hermes.TouchpadView
 import com.mirrorx.app.network.MirrorWebSocket
+import com.mirrorx.app.network.NetworkScanner
 import com.mirrorx.app.touch.TouchHandler
 import com.mirrorx.app.touch.TouchHandler.TouchMode
 import com.mirrorx.app.ui.theme.MirrorAccent
@@ -61,6 +56,7 @@ import com.mirrorx.app.ui.theme.MirrorText
 import com.mirrorx.app.ui.theme.MirrorTextDim
 import com.mirrorx.app.ui.theme.MirrorYellow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class CursorSize(val scale: Float, val label: String) {
     MICRO(0.007f, "Micro"),    // v1.2.1: ultra-tiny for monitor + stylus
@@ -100,6 +96,12 @@ fun MirrorScreen() {
 
     val ws = remember { MirrorWebSocket() }
 
+    // v1.8.1: disconnect WebSocket when composable leaves composition
+    // to prevent TCP socket leaks when Activity is destroyed
+    DisposableEffect(ws) {
+        onDispose { ws.disconnect() }
+    }
+
     val connectionState by ws.connectionState.collectAsState()
     val frame by ws.currentFrame.collectAsState()
     val screenInfo by ws.screenInfo.collectAsState()
@@ -108,12 +110,31 @@ fun MirrorScreen() {
     val serverCursorVisible by ws.cursorVisible.collectAsState()
     // v1.2.2: server-driven adaptation info for the "Adapt." badge
     val serverAdapt by ws.serverAdapt.collectAsState()
+    // v1.7.0: multi-monitor support
+    val monitors by ws.monitors.collectAsState()
+    val currentMonitorIdx by ws.currentMonitorIdx.collectAsState()
+    // v1.8: cursor in monitor bounds
+    val cursorInBounds by ws.cursorInBounds.collectAsState()
 
-    var ipAddress by rememberSaveable { mutableStateOf("192.168.100.11") }
-    var showSettings by rememberSaveable { mutableStateOf(false) }
+    // v1.8.1: persist last-used IP via SharedPreferences instead of hardcoded default
+        val context = LocalContext.current
+        val prefs = remember { context.getSharedPreferences("mirrorx", android.content.Context.MODE_PRIVATE) }
+        var ipAddress by rememberSaveable {
+            mutableStateOf(prefs.getString("last_ip", "192.168.100.12") ?: "192.168.100.12")
+        }
+        // v1.8.1: porta agora e' configuravel (default 8080 para casar com o
+        // .NET server novo). Persistida igual ao IP.
+        var portText by rememberSaveable {
+                    mutableStateOf(prefs.getString("last_port", "8080") ?: "8080")
+                }
+                val port: Int = portText.toIntOrNull()?.coerceIn(1, 65535) ?: 8080
+                var showSettings by rememberSaveable { mutableStateOf(false) }
 
     // v1.2 monitor mode (hide ALL chrome for a clean display)
     var monitorMode by rememberSaveable { mutableStateOf(false) }
+
+    // v1.8.7: touchpad-only mode (Hermes) — embedded in MirrorScreen instead of separate Activity
+    var touchpadMode by rememberSaveable { mutableStateOf(false) }
 
     // --- Touch state ---
     var touchEnabled by rememberSaveable { mutableStateOf(false) }
@@ -130,7 +151,8 @@ fun MirrorScreen() {
 
     // v1.2: cursor auto-hide on stylus
     var cursorHiddenByStylus by remember { mutableStateOf(false) }
-    val cursorVisible = serverCursorVisible && !cursorHiddenByStylus
+    // v1.8: show cursor only when server says visible AND cursor is within monitor bounds
+    val cursorVisible = serverCursorVisible && !cursorHiddenByStylus && cursorInBounds
 
     // v1.4.1: ghost cursor. While the user is touching the screen (CURSOR
     // mode) the ghost follows the finger instantly — no waiting for the
@@ -162,6 +184,11 @@ fun MirrorScreen() {
                 ?.hostAddress ?: "indisponível"
         } catch (_: Exception) { localIp.value = "indisponível" }
     }
+
+    // v1.9: UDP broadcast network scanner state
+    val scope = rememberCoroutineScope()
+    var isScanning by remember { mutableStateOf(false) }
+    var scanMessage by remember { mutableStateOf("") }
 
     // Tap ripple
     val ripples = remember { mutableStateListOf<Ripple>() }
@@ -295,6 +322,9 @@ fun MirrorScreen() {
                 touchMode = touchMode,
                 monitorMode = monitorMode,
                 serverAdapt = serverAdapt,
+                // v1.7.2: multi-monitor
+                monitors = monitors,
+                currentMonitorIdx = currentMonitorIdx,
                 onToggleTouch = {
                     touchEnabled = !touchEnabled
                     lastInteractionMs = System.currentTimeMillis()
@@ -308,7 +338,7 @@ fun MirrorScreen() {
                         TouchMode.OFF -> TouchMode.CURSOR
                         TouchMode.CURSOR -> TouchMode.CLICK_ONLY
                         TouchMode.CLICK_ONLY -> TouchMode.DRAW
-                        TouchMode.DRAW -> TouchMode.HERMES
+                        TouchMode.DRAW -> TouchMode.OFF
                         TouchMode.HERMES -> TouchMode.OFF
                     }
                     touchModeName = next.name
@@ -321,8 +351,8 @@ fun MirrorScreen() {
                     topBarVisible = true
                     lastInteractionMs = System.currentTimeMillis()
                 },
-                onConnect = { ws.connect(ipAddress) },
-                onDisconnect = { ws.disconnect() },
+                onConnect = { ws.connect(ipAddress, port) },
+                                onDisconnect = { ws.disconnect() },
                 onSettingsClick = { showSettings = true },
                 // v1.4.2: explicit click buttons (L/R/2x) — calls pyautogui.click()
                 // at the current PC cursor position. Useful when the user
@@ -353,18 +383,43 @@ fun MirrorScreen() {
     }
 
     if (showSettings) {
-        val context = LocalContext.current
-        val openHermes = {
-            // v1.5.0: launch Hermes activity (touchpad-only mode)
-            val intent = android.content.Intent(context, HermesActivity::class.java)
-            intent.putExtra(HermesActivity.EXTRA_IP, ipAddress)
-            context.startActivity(intent)
-        }
         SettingsDialog(
-            ipAddress = ipAddress,
-            onIpChange = { ipAddress = it },
-            connectionState = connectionState,
+                    ipAddress = ipAddress,
+                    onIpChange = {
+                        ipAddress = it
+                        prefs.edit().putString("last_ip", it).apply()  // v1.8.1: persist
+                    },
+                    portText = portText,                                    // v1.8.1
+                    onPortChange = {
+                        portText = it
+                        prefs.edit().putString("last_port", it).apply()      // v1.8.1: persist
+                    },
+                    connectionState = connectionState,
             localIp = localIp.value,
+            isScanning = isScanning,
+            scanMessage = scanMessage,
+            onScanNetwork = {
+                if (!isScanning) {
+                    isScanning = true
+                    scanMessage = "Procurando servidor..."
+                    scope.launch {
+                        val result = NetworkScanner.scanForServer()
+                        if (result != null) {
+                            ipAddress = result.ip
+                            prefs.edit().putString("last_ip", result.ip).apply()
+                            portText = result.port.toString()
+                            prefs.edit().putString("last_port", result.port.toString()).apply()
+                            scanMessage = "✓ ${result.ip}:${result.port} encontrado!"
+                        } else {
+                            scanMessage = "Nenhum servidor encontrado na rede."
+                        }
+                        isScanning = false
+                        // Clear message after 5 seconds
+                        delay(5000)
+                        scanMessage = ""
+                    }
+                }
+            },
             touchEnabled = touchEnabled,
             onTouchEnabledChange = { touchEnabled = it },
             touchMode = touchMode,
@@ -378,11 +433,60 @@ fun MirrorScreen() {
                 topBarVisible = true
                 lastInteractionMs = System.currentTimeMillis()
             },
-            onConnect = { ws.connect(ipAddress) },
-            onDisconnect = { ws.disconnect() },
-            onDismiss = { showSettings = false },
-            onOpenHermes = openHermes
+            touchpadMode = touchpadMode,  // v1.8.7: pass touchpad mode
+            onTouchpadModeChange = {  // v1.8.7: toggle embedded touchpad
+                touchpadMode = it
+                if (it) {
+                    // Close settings when entering touchpad mode
+                    showSettings = false
+                }
+            },
+            // v1.7.2: multi-monitor
+            monitors = monitors,
+            currentMonitorIdx = currentMonitorIdx,
+            onMonitorSwitch = { idx -> ws.sendMonitorSwitch(idx) },
+            onConnect = { ws.connect(ipAddress, port) },
+                            onDisconnect = { ws.disconnect() },
+            onDismiss = { showSettings = false }
         )
+    }
+
+    // v1.8.7: Embedded TouchpadView (Hermes) — replaces separate HermesActivity
+    LaunchedEffect(touchpadMode) {
+        if (touchpadMode && connectionState !is MirrorWebSocket.ConnectionState.Connected && connectionState !is MirrorWebSocket.ConnectionState.Connecting) {
+            ws.connect(ipAddress, port)
+        }
+    }
+
+    if (touchpadMode) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF050507))
+        ) {
+            TouchpadView(
+                client = ws,
+                modifier = Modifier.fillMaxSize()
+            )
+            // Floating back button
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp)
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xCC000000))
+                    .clickable { touchpadMode = false },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Voltar",
+                    tint = MirrorRed,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
     }
 }
 
@@ -567,6 +671,9 @@ private fun ConnectionBar(
     onToggleTouch: () -> Unit,
     onCycleTouchMode: () -> Unit,
     onToggleMonitorMode: () -> Unit,
+    // v1.7.2: multi-monitor badge
+    monitors: List<MirrorWebSocket.MonitorInfo> = emptyList(),
+    currentMonitorIdx: Int = 0,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -683,6 +790,24 @@ private fun ConnectionBar(
                     color = fpsColor(fps),
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
+            }
+
+            // v1.7.2: Monitor badge — shows which monitor is active (only if multiple)
+            if (monitors.size > 1) {
+                Surface(
+                    color = MirrorSurfaceVariant,
+                    shape = RoundedCornerShape(6.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp, MirrorAccent.copy(alpha = 0.4f)
+                    )
+                ) {
+                    Text(
+                        text = "Tela ${currentMonitorIdx + 1}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MirrorAccent,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
 
             // Connection button (v1.4.1: bigger touch target + label on phones)
@@ -878,7 +1003,6 @@ private fun TouchBadge(
             Icon(
                 imageVector = if (mode == TouchMode.DRAW) Icons.Default.Edit
                               else if (mode == TouchMode.CLICK_ONLY) Icons.Default.Phone
-                              else if (mode == TouchMode.HERMES) Icons.Default.Add
                               else Icons.Default.Build,
                 contentDescription = null,
                 tint = color,
@@ -898,8 +1022,13 @@ private fun TouchBadge(
 private fun SettingsDialog(
     ipAddress: String,
     onIpChange: (String) -> Unit,
+    portText: String,                              // v1.8.1: porta configuravel
+    onPortChange: (String) -> Unit,
     connectionState: MirrorWebSocket.ConnectionState,
     localIp: String,
+    isScanning: Boolean = false,                   // v1.9: network scan state
+    scanMessage: String = "",                      // v1.9: scan feedback message
+    onScanNetwork: () -> Unit = {},                // v1.9: trigger network scan
     touchEnabled: Boolean,
     onTouchEnabledChange: (Boolean) -> Unit,
     touchMode: TouchMode,
@@ -908,11 +1037,15 @@ private fun SettingsDialog(
     onCursorSizeChange: (CursorSize) -> Unit,
     monitorMode: Boolean,
     onMonitorModeChange: (Boolean) -> Unit,
+    touchpadMode: Boolean,                          // v1.8.7: embedded touchpad (Hermes)
+    onTouchpadModeChange: (Boolean) -> Unit,        // v1.8.7
+    // v1.7.2: multi-monitor support
+    monitors: List<MirrorWebSocket.MonitorInfo> = emptyList(),
+    currentMonitorIdx: Int = 0,
+    onMonitorSwitch: (Int) -> Unit = {},
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
-    onDismiss: () -> Unit,
-    // v1.5.0: launch Hermes activity (mouse-only mode)
-    onOpenHermes: () -> Unit = {}
+    onDismiss: () -> Unit
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -940,12 +1073,28 @@ private fun SettingsDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // v1.9: accent icon badge next to title
+                    Surface(
+                        color = MirrorAccent.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                tint = MirrorAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
                     Text(
                         text = "Configurações",
                         style = MaterialTheme.typography.headlineSmall.copy(
                             fontWeight = FontWeight.Bold
                         ),
-                        color = MirrorAccent,
+                        color = MirrorText,
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(onClick = onDismiss) {
@@ -956,35 +1105,125 @@ private fun SettingsDialog(
                         )
                     }
                 }
-                Divider(color = MirrorBorder)
-
-                SettingsSection(title = "Conexão com PC", icon = Icons.Default.Phone) {
-                    OutlinedTextField(
-                        value = ipAddress,
-                        onValueChange = onIpChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("IP do PC (porta 9900)") },
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MirrorAccent,
-                            unfocusedBorderColor = MirrorBorder,
-                            focusedTextColor = MirrorText,
-                            unfocusedTextColor = MirrorText,
-                            cursorColor = MirrorAccent,
-                            focusedLabelColor = MirrorAccent,
-                            unfocusedLabelColor = MirrorTextDim,
+                // v1.9: subtle accent line instead of full divider
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                colors = listOf(MirrorAccent, MirrorAccent.copy(alpha = 0.1f), Color.Transparent)
+                            )
                         )
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "IP local do tablet: $localIp",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MirrorTextDim
-                    )
-                    Spacer(Modifier.height(10.dp))
+                )
+
+                SettingsSection(title = "Conexão", icon = Icons.Default.Phone) {
+                                    // v1.8.1: IP + Porta lado a lado (Row com weight)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = ipAddress,
+                                            onValueChange = onIpChange,
+                                            modifier = Modifier.weight(1f),
+                                            singleLine = true,
+                                            label = { Text("IP do PC") },
+                                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                                fontFamily = FontFamily.Monospace
+                                            ),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = MirrorAccent,
+                                                unfocusedBorderColor = MirrorBorder,
+                                                focusedTextColor = MirrorText,
+                                                unfocusedTextColor = MirrorText,
+                                                cursorColor = MirrorAccent,
+                                                focusedLabelColor = MirrorAccent,
+                                                unfocusedLabelColor = MirrorTextDim,
+                                            )
+                                        )
+                                        OutlinedTextField(
+                                            value = portText,
+                                            onValueChange = { v ->
+                                                // aceita apenas digitos
+                                                val filtered = v.filter { it.isDigit() }.take(5)
+                                                onPortChange(filtered)
+                                            },
+                                            modifier = Modifier.width(110.dp),
+                                            singleLine = true,
+                                            label = { Text("Porta") },
+                                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                                fontFamily = FontFamily.Monospace
+                                            ),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = MirrorAccent,
+                                                unfocusedBorderColor = MirrorBorder,
+                                                focusedTextColor = MirrorText,
+                                                unfocusedTextColor = MirrorText,
+                                                cursorColor = MirrorAccent,
+                                                focusedLabelColor = MirrorAccent,
+                                                unfocusedLabelColor = MirrorTextDim,
+                                            )
+                                        )
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = "IP local do tablet: $localIp",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MirrorTextDim
+                                    )
+                                    // v1.8.1: dica para emulador Android (10.0.2.2 = host PC)
+                                    Text(
+                                        text = "Dica: no emulador Android use IP 10.0.2.2 (e' o proprio PC).",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MirrorTextDim
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    // v1.9: Scan Network button — UDP broadcast discovery
+                                    OutlinedButton(
+                                        onClick = onScanNetwork,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        enabled = !isScanning &&
+                                            connectionState !is MirrorWebSocket.ConnectionState.Connecting,
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            contentColor = MirrorAccent
+                                        ),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isScanning) MirrorAccent.copy(alpha = 0.5f) else MirrorBorder
+                                        )
+                                    ) {
+                                        if (isScanning) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                color = MirrorAccent,
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("Procurando...", style = MaterialTheme.typography.labelLarge)
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.Search,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("Procurar na Rede", style = MaterialTheme.typography.labelLarge)
+                                        }
+                                    }
+                                    // v1.9: Scan feedback message
+                                    if (scanMessage.isNotEmpty()) {
+                                        Text(
+                                            text = scanMessage,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (scanMessage.startsWith("✓")) MirrorGreen
+                                                    else if (scanMessage.startsWith("Nenhum")) MirrorRed
+                                                    else MirrorYellow,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
                     if (connectionState is MirrorWebSocket.ConnectionState.Connected) {
                         OutlinedButton(
                             onClick = onDisconnect,
@@ -1011,8 +1250,50 @@ private fun SettingsDialog(
                     }
                 }
 
-                // v1.2: Monitor mode
-                SettingsSection(title = "Modo Monitor", icon = Icons.Default.Add) {
+                // v1.7.0: Monitor selector — only when connected with multiple monitors
+                if (monitors.size > 1 && connectionState is MirrorWebSocket.ConnectionState.Connected) {
+                    SettingsSection(title = "Tela", icon = Icons.Default.Phone) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            monitors.forEach { mon ->
+                                val selected = mon.idx == currentMonitorIdx
+                                Surface(
+                                    color = if (selected) MirrorAccent else MirrorSurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onMonitorSwitch(mon.idx) },
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (selected) MirrorAccent else MirrorBorder
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = "Tela ${mon.idx + 1}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = if (selected) MirrorText else MirrorTextDim,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                        Text(
+                                            text = "${mon.w}x${mon.h}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MirrorTextDim
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // v1.2: Monitor mode + Touch combined
+                SettingsSection(title = "Modo de Exibição", icon = Icons.Default.Add) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1020,12 +1301,12 @@ private fun SettingsDialog(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Tela cheia sem distrações",
+                                text = "Modo Monitor",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MirrorText
                             )
                             Text(
-                                text = "Esconde barras, simula um monitor dedicado",
+                                text = "Tela cheia sem distrações",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MirrorTextDim
                             )
@@ -1041,81 +1322,71 @@ private fun SettingsDialog(
                             )
                         )
                     }
-                }
-
-                SettingsSection(title = "Touch (v1.2)", icon = Icons.Default.Phone) {
+                    Divider(color = MirrorBorder, modifier = Modifier.padding(vertical = 4.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = "Ativar touch input",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MirrorText
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Touch Input",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MirrorText
+                            )
+                            Text(
+                                text = "Cursor, caneta ou desenhar",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MirrorTextDim
+                            )
+                        }
                         Switch(
                             checked = touchEnabled,
                             onCheckedChange = onTouchEnabledChange,
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = MirrorText,
-                                checkedTrackColor = MirrorAccent,
+                                checkedTrackColor = MirrorGreen,
                                 uncheckedThumbColor = MirrorTextDim,
                                 uncheckedTrackColor = MirrorBorder,
                             )
                         )
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "Modo de interação",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MirrorTextDim
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        TouchModeChip(
-                            label = "Cursor",
-                            icon = Icons.Default.Build,
-                            selected = touchEnabled && touchMode == TouchMode.CURSOR,
-                            enabled = touchEnabled,
-                            onClick = { onTouchModeChange(TouchMode.CURSOR) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        TouchModeChip(
-                            label = "Caneta",
-                            icon = Icons.Default.Phone,
-                            selected = touchEnabled && touchMode == TouchMode.CLICK_ONLY,
-                            enabled = touchEnabled,
-                            onClick = { onTouchModeChange(TouchMode.CLICK_ONLY) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        TouchModeChip(
-                            label = "Desenhar",
-                            icon = Icons.Default.Edit,
-                            selected = touchEnabled && touchMode == TouchMode.DRAW,
-                            enabled = touchEnabled,
-                            onClick = { onTouchModeChange(TouchMode.DRAW) },
-                            modifier = Modifier.weight(1f)
-                        )
+                    if (touchEnabled) {
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            TouchModeChip(
+                                label = "Cursor",
+                                icon = Icons.Default.Build,
+                                selected = touchMode == TouchMode.CURSOR,
+                                enabled = true,
+                                onClick = { onTouchModeChange(TouchMode.CURSOR) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            TouchModeChip(
+                                label = "Caneta",
+                                icon = Icons.Default.Phone,
+                                selected = touchMode == TouchMode.CLICK_ONLY,
+                                enabled = true,
+                                onClick = { onTouchModeChange(TouchMode.CLICK_ONLY) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            TouchModeChip(
+                                label = "Desenhar",
+                                icon = Icons.Default.Edit,
+                                selected = touchMode == TouchMode.DRAW,
+                                enabled = true,
+                                onClick = { onTouchModeChange(TouchMode.DRAW) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "Cursor é escondido automaticamente quando a caneta está em uso.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MirrorTextDim
-                    )
                 }
 
-                SettingsSection(title = "Visual", icon = Icons.Default.Build) {
-                    Text(
-                        text = "Tamanho do cursor do PC no tablet",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MirrorTextDim
-                    )
-                    Spacer(Modifier.height(6.dp))
+                // Visual: cursor size
+                SettingsSection(title = "Cursor", icon = Icons.Default.Build) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1139,7 +1410,7 @@ private fun SettingsDialog(
                                     color = if (selected) MirrorText else MirrorTextDim,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
+                                        .padding(vertical = 6.dp),
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
                             }
@@ -1147,51 +1418,165 @@ private fun SettingsDialog(
                     }
                 }
 
-                SettingsSection(title = "Informações", icon = Icons.Default.Info) {
-                    InfoRow(label = "Versão", value = BuildConfig.VERSION_NAME)
-                    InfoRow(label = "Protocolo", value = "WebSocket + JPEG v1.3.0")
-                    InfoRow(label = "Stylus", value = "Pressure + tilt + palm-reject")
-                }
-
-                // v1.5.0: Hermes mode launcher — touchpad-only mouse control
-                SettingsSection(
-                    title = "Modo Hermes (v1.5.0)",
-                    icon = Icons.Default.Build
-                ) {
-                    Text(
-                        text = "Controle puro de mouse, sem vídeo. " +
-                            "Latência muito menor (~20ms vs ~200ms).",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MirrorTextDim,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = {
-                            onDismiss()
-                            onOpenHermes()
-                        },
+                // v1.8.7: Modo de Uso — Video Remoto ou Touchpad Puro (Hermes embutido)
+                SettingsSection(title = "Modo de Uso", icon = Icons.Default.Build) {
+                    // Modo 1: Vídeo Remoto (padrão)
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MirrorGreen
-                        )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Abrir Hermes (Touchpad)")
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Vídeo Remoto",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MirrorText,
+                                fontWeight = if (!touchpadMode) FontWeight.Bold else FontWeight.Normal
+                            )
+                            Text(
+                                text = "Espelha a tela do PC com touch",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MirrorTextDim
+                            )
+                        }
+                        RadioButton(
+                            selected = !touchpadMode,
+                            onClick = { if (touchpadMode) onTouchpadModeChange(false) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MirrorAccent,
+                                unselectedColor = MirrorTextDim
+                            )
+                        )
+                    }
+                    Divider(color = MirrorBorder, modifier = Modifier.padding(vertical = 4.dp))
+                    // Modo 2: Touchpad Puro (Hermes)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Touchpad Puro",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MirrorText,
+                                fontWeight = if (touchpadMode) FontWeight.Bold else FontWeight.Normal
+                            )
+                            Text(
+                                text = "Controle puro de mouse, sem vídeo. Latência ~20ms.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MirrorTextDim
+                            )
+                        }
+                        RadioButton(
+                            selected = touchpadMode,
+                            onClick = { if (!touchpadMode) onTouchpadModeChange(true) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MirrorGreen,
+                                unselectedColor = MirrorTextDim
+                            )
+                        )
                     }
                 }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MirrorAccent
+
+                // v1.8.7: Aceleração por Hardware — controla decode do JPEG no cliente Android
+                SettingsSection(title = "Aceleração por Hardware", icon = Icons.Default.Build) {
+                    var hwAccel by rememberSaveable { mutableStateOf("Auto") }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(
+                            "Auto" to "Detecta automatico",
+                            "Hardware" to "Usa GPU (mais rapido)",
+                            "Software" to "CPU (mais compativel)"
+                        ).forEach { (label, desc) ->
+                            val selected = hwAccel == label
+                            Surface(
+                                color = if (selected) MirrorAccent else MirrorSurface,
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (selected) MirrorAccent else MirrorBorder
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { hwAccel = label }
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (selected) MirrorText else MirrorTextDim,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                    Text(
+                                        text = desc,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selected) MirrorText.copy(alpha = 0.8f) else MirrorTextDim.copy(alpha = 0.7f),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // v1.8.7: Gestos — instruções do modo trackpad e tátil
+                SettingsSection(title = "Gestos", icon = Icons.Default.Info) {
+                    Text(
+                        text = "Modo Trackpad (Touchpad Puro):",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MirrorAccent,
+                        fontWeight = FontWeight.Bold
                     )
+                    Spacer(Modifier.height(4.dp))
+                    GestureRow("Arrastar 1 dedo", "Mover cursor")
+                    GestureRow("Toque rápido", "Clique esquerdo")
+                    GestureRow("Toque 2 dedos", "Clique direito")
+                    GestureRow("Arrastar 2 dedos", "Rolar tela")
+                    GestureRow("Pinça (2 dedos)", "Zoom")
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "Modo Tátil (Vídeo Remoto):",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MirrorAccent,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    GestureRow("Toque", "Clique no PC")
+                    GestureRow("Arrastar", "Arrastar no PC")
+                    GestureRow("Dois dedos", "Alternar modo touch")
+                }
+
+                // Footer: version + close
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Fechar",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        text = "v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MirrorTextDim
                     )
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MirrorAccent
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            "Fechar",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -1243,23 +1628,59 @@ private fun SettingsSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // v1.9: Section header with accent-tinted icon and subtle underline
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(imageVector = icon, contentDescription = null, tint = MirrorAccent,
-                 modifier = Modifier.size(18.dp))
-            Text(text = title, style = MaterialTheme.typography.titleMedium, color = MirrorText)
-        }
-        Surface(
-            color = MirrorSurfaceVariant,
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                content = content
+            Surface(
+                color = MirrorAccent.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.size(28.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MirrorAccent,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MirrorText,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.3.sp
             )
+        }
+        // v1.9: Card with left accent stripe using IntrinsicSize for proper height
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+        ) {
+            // Left accent stripe
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp))
+                    .background(MirrorAccent.copy(alpha = 0.5f))
+            )
+            Surface(
+                color = MirrorSurfaceVariant,
+                shape = RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp),
+                modifier = Modifier.weight(1f),
+                tonalElevation = 1.dp,
+                border = BorderStroke(0.5.dp, MirrorBorder.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    content = content
+                )
+            }
         }
     }
 }
@@ -1273,6 +1694,29 @@ private fun InfoRow(label: String, value: String) {
             text = value,
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             color = MirrorText
+        )
+    }
+}
+
+// v1.8.7: linha de gesto (ação → resultado)
+@Composable
+private fun GestureRow(action: String, result: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "• $action",
+            style = MaterialTheme.typography.bodySmall,
+            color = MirrorText,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = "→ $result",
+            style = MaterialTheme.typography.bodySmall,
+            color = MirrorTextDim
         )
     }
 }
