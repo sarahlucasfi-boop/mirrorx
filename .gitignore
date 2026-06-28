@@ -1,20 +1,10 @@
-# Build outputs
+# Build outputs & publish folders
 server_dotnet/bin/
 server_dotnet/obj/
-server_dotnet/publish/
-server_dotnet/publish_standalone/
-server_dotnet/publish_singlefile/
-server_dotnet/*.exe
-server_dotnet/*.dll
-server_dotnet/*.pdb
+server_dotnet/publish_*/
 
-# Android build
-android_source/app/build/
-android_source/build/
-android_source/.gradle/
-android_source/local.properties
-
-# OS
-desktop.ini
-Thumbs.db
-.DS_Store
+# IDE
+.idea/
+*.suo
+*.user
+.vs/

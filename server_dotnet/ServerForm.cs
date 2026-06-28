@@ -39,7 +39,7 @@ public class ServerForm : Form
 
     public ServerForm()
     {
-        Text = "MirrorX Server v1.9.2";
+        Text = "MirrorX Server v1.9.6";
         Size = new Size(520, 800);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = BG;
@@ -62,7 +62,7 @@ public class ServerForm : Form
         y += 40;
 
         var sub = new Label {
-            Text = "v1.9.2 \u2022 Touchpad de Tela Cheia",
+            Text = "v1.9.6 \u2022 Corre\u00E7\u00E3o Layout/Clique",
             Font = new Font("Segoe UI", 9),
             ForeColor = DIM,
             Location = new Point(16, y),
@@ -221,7 +221,7 @@ public class ServerForm : Form
         btnPanel.Controls.Add(btnStop);
 
         lblVersion = new Label {
-            Text = "v1.9.2",
+            Text = "v1.9.6",
             Font = new Font("Segoe UI", 8),
             ForeColor = DIM,
             Anchor = AnchorStyles.Bottom | AnchorStyles.Right,

@@ -57,6 +57,8 @@ import com.mirrorx.app.ui.theme.MirrorTextDim
 import com.mirrorx.app.ui.theme.MirrorYellow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.layout.onSizeChanged
 
 private enum class CursorSize(val scale: Float, val label: String) {
     MICRO(0.007f, "Micro"),    // v1.2.1: ultra-tiny for monitor + stylus
@@ -164,6 +166,9 @@ fun MirrorScreen() {
     // v1.2: top bar auto-hide (3s without touch)
     var topBarVisible by remember { mutableStateOf(true) }
     var lastInteractionMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    // v1.9.5: measure ConnectionBar height so MirrorContent can be padded below it (normal mode)
+    // v1.9.6: não precisa mais de density — position filtering usa pixels diretamente
+    var barHeightPx by remember { mutableIntStateOf(0) }
 
     // v1.2.2: Back button always exits Monitor Mode (was missing — user got stuck).
     // Placed AFTER all the state it touches so the compiler can resolve them.
@@ -287,97 +292,154 @@ fun MirrorScreen() {
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF050507))
-    ) {
-        MirrorContent(
-            frame = frame,
-            screenInfo = screenInfo,
-            // v1.4.1: predictedCursor is the ghost-cursor position — moves
-            // with the finger instantly (CURSOR mode) or snaps to the last
-            // server-confirmed cursor position (when idle).
-            mousePos = predictedCursor,
-            cursorScale = cursorSize.scale,
-            cursorVisible = cursorVisible,
-            ripples = ripples,
-            touchEnabled = touchEnabled,
-            touchHandler = touchHandler,
-            onAnyInteraction = { lastInteractionMs = System.currentTimeMillis() },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // v1.2.2: Top bar shows whenever topBarVisible=true (regardless of monitorMode).
-        // Previously the `!monitorMode` gate hid the bar in monitor mode, leaving the
-        // user with no way to leave (the icon button lived in the bar they couldn't see).
-        // Now: edge-swipe in monitor mode reveals the bar, the bar's monitor-mode toggle
-        // turns it off again. BackHandler is a second safety net.
-        if (topBarVisible) {
-            ConnectionBar(
-                ipAddress = ipAddress,
-                connectionState = connectionState,
-                fps = fps,
+    // v1.9.6: Layout separado por modo.
+    // NORMAL → Column (ConnectionBar em cima, MirrorContent embaixo — SEM sobreposição)
+    // MONITOR → Box (MirrorContent tela cheia, ConnectionBar sobreposto)
+    if (monitorMode) {
+        // ── MODO MONITOR: Box com MirrorContent preenchendo a tela e ConnectionBar sobreposta ──
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF050507))
+        ) {
+            MirrorContent(
+                frame = frame,
+                screenInfo = screenInfo,
+                mousePos = predictedCursor,
+                cursorScale = cursorSize.scale,
+                cursorVisible = cursorVisible,
+                ripples = ripples,
                 touchEnabled = touchEnabled,
-                touchMode = touchMode,
-                monitorMode = monitorMode,
-                serverAdapt = serverAdapt,
-                // v1.7.2: multi-monitor
-                monitors = monitors,
-                currentMonitorIdx = currentMonitorIdx,
-                onToggleTouch = {
-                    touchEnabled = !touchEnabled
-                    lastInteractionMs = System.currentTimeMillis()
-                    // v1.2.3: default to CURSOR (touchpad) when turning touch on
-                    if (touchEnabled && touchMode == TouchMode.OFF) {
-                        touchModeName = TouchMode.CURSOR.name
-                    }
-                },
-                onCycleTouchMode = {
-                    val next = when (touchMode) {
-                        TouchMode.OFF -> TouchMode.CURSOR
-                        TouchMode.CURSOR -> TouchMode.CLICK_ONLY
-                        TouchMode.CLICK_ONLY -> TouchMode.DRAW
-                        TouchMode.DRAW -> TouchMode.OFF
-                        TouchMode.HERMES -> TouchMode.OFF
-                    }
-                    touchModeName = next.name
-                    lastInteractionMs = System.currentTimeMillis()
-                },
-                onToggleMonitorMode = {
-                    monitorMode = !monitorMode
-                    // v1.2.2: always show the bar when toggling — ensures the user can
-                    // see the toggle button they just pressed and switch back if needed.
-                    topBarVisible = true
-                    lastInteractionMs = System.currentTimeMillis()
-                },
-                onConnect = { ws.connect(ipAddress, port) },
-                                onDisconnect = { ws.disconnect() },
-                onSettingsClick = { showSettings = true },
-                // v1.4.2: explicit click buttons (L/R/2x) — calls pyautogui.click()
-                // at the current PC cursor position. Useful when the user
-                // already positioned the cursor and just needs to click without
-                // re-tapping the screen.
-                onClickRequest = { button -> ws.sendClickRequest(button) },
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
+                touchHandler = touchHandler,
+                onAnyInteraction = { lastInteractionMs = System.currentTimeMillis() },
+                // v1.9.6: passa a altura da barra para position-based filtering
+                barHeightPx = barHeightPx,
+                modifier = Modifier.fillMaxSize()
             )
-        }
 
-        // v1.2: edge-swipe area at top — tap to show top bar in monitor mode
-        if (monitorMode && !topBarVisible) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .height(60.dp)
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = {
-                            topBarVisible = true
-                            lastInteractionMs = System.currentTimeMillis()
-                        })
-                    }
+            // ConnectionBar em modo monitor: sobreposta no topo, mede altura para filtering
+            if (topBarVisible) {
+                ConnectionBar(
+                    ipAddress = ipAddress,
+                    connectionState = connectionState,
+                    fps = fps,
+                    touchEnabled = touchEnabled,
+                    touchMode = touchMode,
+                    monitorMode = monitorMode,
+                    serverAdapt = serverAdapt,
+                    monitors = monitors,
+                    currentMonitorIdx = currentMonitorIdx,
+                    onToggleTouch = {
+                        touchEnabled = !touchEnabled
+                        lastInteractionMs = System.currentTimeMillis()
+                        if (touchEnabled && touchMode == TouchMode.OFF) {
+                            touchModeName = TouchMode.CURSOR.name
+                        }
+                    },
+                    onCycleTouchMode = {
+                        val next = when (touchMode) {
+                            TouchMode.OFF -> TouchMode.CURSOR
+                            TouchMode.CURSOR -> TouchMode.CLICK_ONLY
+                            TouchMode.CLICK_ONLY -> TouchMode.DRAW
+                            TouchMode.DRAW -> TouchMode.OFF
+                            TouchMode.HERMES -> TouchMode.OFF
+                        }
+                        touchModeName = next.name
+                        lastInteractionMs = System.currentTimeMillis()
+                    },
+                    onToggleMonitorMode = {
+                        monitorMode = !monitorMode
+                        topBarVisible = true
+                        lastInteractionMs = System.currentTimeMillis()
+                    },
+                    onConnect = { ws.connect(ipAddress, port) },
+                    onDisconnect = { ws.disconnect() },
+                    onSettingsClick = { showSettings = true },
+                    onClickRequest = { button -> ws.sendClickRequest(button) },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .onSizeChanged { barHeightPx = it.height }
+                )
+            }
+
+            // v1.2: edge-swipe area at top — tap to show top bar in monitor mode
+            if (!topBarVisible) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = {
+                                topBarVisible = true
+                                lastInteractionMs = System.currentTimeMillis()
+                            })
+                        }
+                )
+            }
+        }
+    } else {
+        // ── MODO NORMAL: Column — ConnectionBar em cima, MirrorContent embaixo (SEM OVERLAP) ──
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF050507))
+        ) {
+            if (topBarVisible) {
+                ConnectionBar(
+                    ipAddress = ipAddress,
+                    connectionState = connectionState,
+                    fps = fps,
+                    touchEnabled = touchEnabled,
+                    touchMode = touchMode,
+                    monitorMode = monitorMode,
+                    serverAdapt = serverAdapt,
+                    monitors = monitors,
+                    currentMonitorIdx = currentMonitorIdx,
+                    onToggleTouch = {
+                        touchEnabled = !touchEnabled
+                        lastInteractionMs = System.currentTimeMillis()
+                        if (touchEnabled && touchMode == TouchMode.OFF) {
+                            touchModeName = TouchMode.CURSOR.name
+                        }
+                    },
+                    onCycleTouchMode = {
+                        val next = when (touchMode) {
+                            TouchMode.OFF -> TouchMode.CURSOR
+                            TouchMode.CURSOR -> TouchMode.CLICK_ONLY
+                            TouchMode.CLICK_ONLY -> TouchMode.DRAW
+                            TouchMode.DRAW -> TouchMode.OFF
+                            TouchMode.HERMES -> TouchMode.OFF
+                        }
+                        touchModeName = next.name
+                        lastInteractionMs = System.currentTimeMillis()
+                    },
+                    onToggleMonitorMode = {
+                        monitorMode = !monitorMode
+                        topBarVisible = true
+                        lastInteractionMs = System.currentTimeMillis()
+                    },
+                    onConnect = { ws.connect(ipAddress, port) },
+                    onDisconnect = { ws.disconnect() },
+                    onSettingsClick = { showSettings = true },
+                    onClickRequest = { button -> ws.sendClickRequest(button) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            MirrorContent(
+                frame = frame,
+                screenInfo = screenInfo,
+                mousePos = predictedCursor,
+                cursorScale = cursorSize.scale,
+                cursorVisible = cursorVisible,
+                ripples = ripples,
+                touchEnabled = touchEnabled,
+                touchHandler = touchHandler,
+                onAnyInteraction = { lastInteractionMs = System.currentTimeMillis() },
+                // v1.9.6: modo normal = Column, MirrorContent fica ABAIXO da barra estruturalmente
+                barHeightPx = 0,
+                modifier = Modifier.fillMaxSize().weight(1f)
             )
         }
     }
@@ -508,9 +570,11 @@ private fun MirrorContent(
     touchEnabled: Boolean,
     touchHandler: TouchHandler,
     onAnyInteraction: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
+    // v1.9.6: altura da ConnectionBar em pixels para filtrar toques no overlap (modo monitor)
+    barHeightPx: Int = 0,
+        modifier: Modifier = Modifier
+    ) {
+        Box(
         modifier = modifier.background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
@@ -558,17 +622,41 @@ private fun MirrorContent(
                             .fillMaxSize()
                             .pointerInput(touchHandler.mode) {
                                 awaitPointerEventScope {
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull() ?: continue
-                                        if (change.isConsumed) continue
-                                        val action = when {
-                                            !change.previousPressed && change.pressed ->
-                                                MotionEvent.ACTION_DOWN
-                                            change.previousPressed && !change.pressed ->
-                                                MotionEvent.ACTION_UP
-                                            else -> MotionEvent.ACTION_MOVE
-                                        }
+                                                                    // v1.9.6: pointerInput agora verifica TAMBÉM a posição do toque.
+                                                                    // Se a ConnectionBar está visível e o toque Y está dentro da altura
+                                                                    // dela, o evento é ignorado (position-based filtering).
+                                                                    // Isso funciona como REDUNDÂNCIA ao isConsumed — cobre casos onde
+                                                                    // o evento não foi consumido ou não foi entregue como consumido.
+                                                                    var gestureOwnedByOverlay = false
+                                                                    while (true) {
+                                                                        val event = awaitPointerEvent(PointerEventPass.Final)
+                                                                        val change = event.changes.firstOrNull() ?: continue
+                                                                        val action = when {
+                                                                            !change.previousPressed && change.pressed ->
+                                                                                MotionEvent.ACTION_DOWN
+                                                                            change.previousPressed && !change.pressed ->
+                                                                                MotionEvent.ACTION_UP
+                                                                            else -> MotionEvent.ACTION_MOVE
+                                                                        }
+                                                                        // v1.9.6: position-based filtering — se o toque está na área
+                                                                        // da ConnectionBar (topo da tela), ignora o gesto inteiro.
+                                                                        // Necessário em modo monitor onde MirrorContent preenche a tela
+                                                                        // e a ConnectionBar sobrepõe.
+                                                                        if (barHeightPx > 0 && change.position.y < barHeightPx) {
+                                                                            if (action == MotionEvent.ACTION_UP) gestureOwnedByOverlay = false
+                                                                            continue
+                                                                        }
+                                                                        // No DOWN: decide o dono do gesto baseado no estado final
+                                                                        if (action == MotionEvent.ACTION_DOWN) {
+                                                                            gestureOwnedByOverlay = change.isConsumed
+                                                                        }
+                                                                        // Se o gesto pertence a um overlay, ignora tudo até o UP
+                                                                        if (gestureOwnedByOverlay) {
+                                                                            if (action == MotionEvent.ACTION_UP) gestureOwnedByOverlay = false
+                                                                            continue
+                                                                        }
+                                                                        // Defesa extra: pula qualquer evento individualmente consumido
+                                                                        if (change.isConsumed) continue
                                         val motion = MotionEvent.obtain(
                                             0L, 0L, action,
                                             change.position.x, change.position.y, 0

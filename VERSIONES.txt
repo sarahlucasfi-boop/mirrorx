@@ -4,6 +4,41 @@
 ╚══════════════════════════════════════════════════════════════════╝
 
 ═══════════════════════════════════════════════════════════════════
+v1.9.5 — 28/06/2026
+═══════════════════════════════════════════════════════════════════
+  Correção Definitiva de Clique + Layout sem Sobreposição
+
+  Bugs corrigidos:
+    ✅ Clique nos botões da barra NÃO move mais o cursor do PC.
+       Causa real: o pointerInput de MirrorContent fica em nós mais
+       profundos que a ConnectionBar. Na propagação Main (folha→raiz),
+       processamos ANTES dos botões consumirem o evento — então
+       isConsumed era sempre false. Fix: PointerEventPass.Final roda
+       depois de TODOS os passes e vê o estado definitivo de consumo.
+    ✅ Conteúdo (stream de vídeo) não é mais coberto pela barra de
+       controle em modo normal. A barra mede sua própria altura via
+       onSizeChanged e aplica esse valor como padding superior no
+       conteúdo — conteúdo fica sempre abaixo da barra.
+    ✅ Modo Monitor (ícone monitor) agora exibe APENAS o stream sem
+       qualquer sobreposição — MirrorContent preenche a tela inteira
+       (padding zerado) e a barra aparece somente ao deslizar do topo.
+  Arquivo alterado: MirrorScreen.kt
+
+═══════════════════════════════════════════════════════════════════
+v1.9.4 — 28/06/2026
+═══════════════════════════════════════════════════════════════════
+  Correção Definitiva de Vazamento de Cliques (Gesture Latch)
+
+  Bug corrigido:
+    ✅ Cliques nos botões da barra de controle (overlay) não movem mais o
+       cursor do PC. O v1.9.3 só bloqueava o evento ACTION_DOWN consumido,
+       mas ACTION_MOVE/ACTION_UP ainda vazavam gerando arraste/traço vertical.
+    ✅ Implementado "gesture latch": se o ACTION_DOWN de um gesto foi
+       consumido por um overlay, TODOS os eventos seguintes desse gesto
+       (MOVE/UP) são ignorados pelo stream de espelhamento.
+  Arquivo alterado: MirrorScreen.kt (bloco pointerInput do MirrorContent)
+
+═══════════════════════════════════════════════════════════════════
 v1.9.2 — 28/06/2026
 ═══════════════════════════════════════════════════════════════════
   Sincronização Global & Correções Finais de Versão

@@ -141,7 +141,7 @@ class Program
         // v1.8.6: GUI + servidor em threads separadas
         gui = new ServerForm();
         gui.Show();
-        gui.Log("Iniciando MirrorX Server v1.9.2...");
+        gui.Log("Iniciando MirrorX Server v1.9.6...");
 
         // Inicia o servidor numa thread dedicada (MTA para DXGI)
         var serverThread = new Thread(() => RunServer(gui)) {
@@ -202,26 +202,34 @@ class Program
             // Inicia os WebSocket servers (1 por porta)
             var servers = new List<WebSocketServer>();
             foreach (var p in PORTS) {
-                var s = new WebSocketServer($"ws://0.0.0.0:{p}");
-                s.Start(socket => {
-                    socket.OnOpen = () => {
-                        lock (clients) clients.Add(socket);
-                        string ip = socket.ConnectionInfo.ClientIpAddress;
-                        form.AddClient(ip);
-                        form.UpdateClientCount(clients.Count);
-                        form.Log($"[+ Conectado] {ip} na porta {p}");
-                    };
-                    socket.OnClose = () => {
-                        lock (clients) clients.Remove(socket);
-                        string ip = socket.ConnectionInfo.ClientIpAddress;
-                        form.RemoveClient(ip);
-                        form.UpdateClientCount(clients.Count);
-                        form.Log($"[- Desconectado] {ip}");
-                    };
-                    socket.OnMessage = HandleTouch;
-                });
-                servers.Add(s);
-                form.Log($"Escutando em ws://{localIp}:{p}");
+                try {
+                    var s = new WebSocketServer($"ws://0.0.0.0:{p}");
+                    s.Start(socket => {
+                        socket.OnOpen = () => {
+                            lock (clients) clients.Add(socket);
+                            string ip = socket.ConnectionInfo.ClientIpAddress;
+                            form.AddClient(ip);
+                            form.UpdateClientCount(clients.Count);
+                            form.Log($"[+ Conectado] {ip} na porta {p}");
+                        };
+                        socket.OnClose = () => {
+                            lock (clients) clients.Remove(socket);
+                            string ip = socket.ConnectionInfo.ClientIpAddress;
+                            form.RemoveClient(ip);
+                            form.UpdateClientCount(clients.Count);
+                            form.Log($"[- Desconectado] {ip}");
+                        };
+                        socket.OnMessage = HandleTouch;
+                    });
+                    servers.Add(s);
+                    form.Log($"Escutando em ws://{localIp}:{p}");
+                }
+                catch (Exception ex) {
+                    form.Log($"[Aviso] Porta {p} indisponível: {ex.Message}", "warn");
+                }
+            }
+            if (servers.Count == 0) {
+                throw new Exception("Nenhuma porta (8080, 9900, 7777) pôde ser aberta!");
             }
 
             form.SetStatus("Online", Color.FromArgb(34, 197, 94));
