@@ -149,12 +149,13 @@ fun TouchpadView(
                         isDragging = false
 
                         var scrollMode = false
-                        var prevScrollY = firstDown.position.y
+                        var maxFingerCount = 1  // v1.9.7: track for 2-finger tap detection
 
                         // Track all subsequent pointer events until all fingers lift
                         do {
                             val event = awaitPointerEvent()
                             val fingerCount = event.changes.count { it.pressed }
+                            if (fingerCount > maxFingerCount) maxFingerCount = fingerCount
 
                             if (event.type == PointerEventType.Move) {
                                 val changes = event.changes
@@ -198,10 +199,14 @@ fun TouchpadView(
                         if (sdx != 0 || sdy != 0) client.sendHermesMove(sdx, sdy)
                         accDx = 0f; accDy = 0f
 
-                        // Tap detection: short press, minimal movement → left click
+                        // v1.9.7: Tap detection with right-click support
                         val held = SystemClock.uptimeMillis() - dragStartMs
-                        if (!scrollMode && !isDragging && held < 280L) {
-                            client.sendHermesClick(0)
+                        if (!scrollMode && !isDragging) {
+                            when {
+                                maxFingerCount >= 2 && held < 400L -> client.sendHermesClick(1)  // 2-finger tap = right click
+                                held >= 500L -> client.sendHermesClick(1)  // long press = right click
+                                held < 280L -> client.sendHermesClick(0)  // 1-finger tap = left click
+                            }
                         }
                         isDragging = false; scrollMode = false
                     }

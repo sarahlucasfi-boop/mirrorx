@@ -4,6 +4,34 @@
 ╚══════════════════════════════════════════════════════════════════╝
 
 ═══════════════════════════════════════════════════════════════════
+v1.9.7 — 28/06/2026
+═══════════════════════════════════════════════════════════════════
+  Right Click por Gestos + Correção Click no Servidor
+
+  Melhorias:
+    ✅ Right Click via 2-finger tap (toque rápido com 2 dedos na
+       área do touchpad — sem mover = right click). Threshold: <400ms.
+    ✅ Right Click via long press (segurar 1 dedo parado >500ms).
+    ✅ Servidor: corrigido — botão R enviava LEFT click (bug desde
+       v1.5.0). Agora b=0 left, b=1 right, b=2 middle com down+up.
+    ✅ Constantes Win32 RDOWN/RUP/MDOWN/MUP adicionadas.
+  Arquivos: TouchpadView.kt, Program.cs
+
+═══════════════════════════════════════════════════════════════════
+v1.9.6 — 28/06/2026
+═══════════════════════════════════════════════════════════════════
+  Layout Column (sem overlap) + PointerEventPass.Final
+
+  Melhorias:
+    ✅ Modo NORMAL usa Column: ConnectionBar em cima, MirrorContent
+       embaixo — zero sobreposição estrutural.
+    ✅ Modo MONITOR mantém Box com overlay.
+    ✅ PointerEventPass.Final: vê consumo definitivo dos botões.
+    ✅ Position-based filtering: toques na área Y da barra ignorados.
+    ✅ Servidor: try-catch por porta + validação servers.Count.
+  Arquivos: MirrorScreen.kt, Program.cs, ServerForm.cs
+
+═══════════════════════════════════════════════════════════════════
 v1.9.5 — 28/06/2026
 ═══════════════════════════════════════════════════════════════════
   Correção Definitiva de Clique + Layout sem Sobreposição

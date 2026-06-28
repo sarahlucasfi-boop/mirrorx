@@ -141,7 +141,7 @@ class Program
         // v1.8.6: GUI + servidor em threads separadas
         gui = new ServerForm();
         gui.Show();
-        gui.Log("Iniciando MirrorX Server v1.9.6...");
+        gui.Log("Iniciando MirrorX Server v1.9.7...");
 
         // Inicia o servidor numa thread dedicada (MTA para DXGI)
         var serverThread = new Thread(() => RunServer(gui)) {
@@ -364,11 +364,16 @@ class Program
                         }
                         break;
 
-                    case "c": // mouse click
+                    case "c": // v1.9.7: mouse click — b: 0=left, 1=right, 2=middle
                         if (root.TryGetProperty("b", out var bProp))
                         {
-                            bool isDown = bProp.GetInt32() == 1;
-                            MouseButton(isDown);
+                            int button = bProp.GetInt32();
+                            switch (button)
+                            {
+                                case 0: MouseClick(LDOWN, LUP); break;
+                                case 1: MouseClick(RDOWN, RUP); break;
+                                case 2: MouseClick(MDOWN, MUP); break;
+                            }
                         }
                         break;
                 }
@@ -406,6 +411,10 @@ class Program
     const int SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77, SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79;
     const uint MOVE = 0x0001, ABSOLUTE = 0x8000, VIRTUALDESK = 0x4000, LDOWN = 0x0002, LUP = 0x0004;
     const uint WHEEL = 0x0800;  // v1.9.0: scroll wheel flag (MOUSEEVENTF_WHEEL)
+    const uint RDOWN = 0x0008;  // v1.9.7: right button down
+    const uint RUP   = 0x0010;  // v1.9.7: right button up
+    const uint MDOWN = 0x0020;  // v1.9.7: middle button down
+    const uint MUP   = 0x0040;  // v1.9.7: middle button up
 
     static void MoveMouseAbsolute(int x, int y)
     {
@@ -423,6 +432,14 @@ class Program
     }
 
     static void MouseButton(bool down) => Send(new MOUSEINPUT { dwFlags = down ? LDOWN : LUP });
+
+    // v1.9.7: single-shot click (down + up) for left/right/middle
+    static void MouseClick(uint downFlag, uint upFlag)
+    {
+        Send(new MOUSEINPUT { dwFlags = downFlag });
+        Thread.Sleep(15);
+        Send(new MOUSEINPUT { dwFlags = upFlag });
+    }
 
     // v1.9.0: scroll wheel \u2014 mouseData is the scroll amount (positive=up, negative=down)
     static void MouseScroll(int delta) =>
