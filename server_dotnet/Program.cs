@@ -23,9 +23,9 @@ class Program
     const int TARGET_FPS = 30;
     static readonly string FIREWALL_RULE = "MirrorX Server";
 
-    // v1.9.0: runtime-controllable scale/quality (no longer const)
-    static long _jpegQuality = 30;
-    static double _scaleFactor = 0.75;
+    // v1.9.1: runtime-controllable scale/quality (no longer const)
+    static long _jpegQuality = 45;
+    static double _scaleFactor = 1.0;
 
     public static long JpegQuality
     {
@@ -141,7 +141,7 @@ class Program
         // v1.8.6: GUI + servidor em threads separadas
         gui = new ServerForm();
         gui.Show();
-        gui.Log("Iniciando MirrorX Server v1.9.0...");
+        gui.Log("Iniciando MirrorX Server v1.9.1...");
 
         // Inicia o servidor numa thread dedicada (MTA para DXGI)
         var serverThread = new Thread(() => RunServer(gui)) {
@@ -347,14 +347,12 @@ class Program
                         }
                         break;
 
-                    case "m": // mouse move
+                    case "m": // v1.9.1: relative delta mouse move (Full-Screen Touchpad)
                         if (root.TryGetProperty("x", out var mxProp) && root.TryGetProperty("y", out var myProp))
                         {
-                            double mx = mxProp.GetDouble();
-                            double my = myProp.GetDouble();
-                            int px = monitorBounds.Left + (int)(mx * monitorBounds.Width);
-                            int py = monitorBounds.Top + (int)(my * monitorBounds.Height);
-                            MoveMouseAbsolute(px, py);
+                            int dx = mxProp.GetInt32();
+                            int dy = myProp.GetInt32();
+                            MoveMouseRelative(dx, dy);
                         }
                         break;
 
@@ -408,6 +406,12 @@ class Program
         int ax = (int)((x - vx) * 65535.0 / vw);
         int ay = (int)((y - vy) * 65535.0 / vh);
         Send(new MOUSEINPUT { dx = ax, dy = ay, dwFlags = MOVE | ABSOLUTE | VIRTUALDESK });
+    }
+
+    // v1.9.1: relative delta move for Full-Screen Touchpad (MOUSEEVENTF_MOVE without ABSOLUTE)
+    static void MoveMouseRelative(int dx, int dy)
+    {
+        Send(new MOUSEINPUT { dx = dx, dy = dy, dwFlags = MOVE });
     }
 
     static void MouseButton(bool down) => Send(new MOUSEINPUT { dwFlags = down ? LDOWN : LUP });

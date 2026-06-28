@@ -6,17 +6,17 @@ namespace MirrorXServer;
 
 public class ServerForm : Form
 {
-    // Cores dark theme (igual ao APK MirrorX)
-    static readonly Color BG = Color.FromArgb(17, 17, 17);
-    static readonly Color CARD = Color.FromArgb(28, 28, 30);
-    static readonly Color CARD2 = Color.FromArgb(38, 38, 42);
-    static readonly Color ACCENT = Color.FromArgb(99, 102, 241);       // indigo
+    // v1.9.1 — Janela de configuração com fundo AZUL (diferenciação visual do APK)
+    static readonly Color BG    = Color.FromArgb(10, 28, 80);      // azul escuro profundo
+    static readonly Color CARD  = Color.FromArgb(18, 42, 110);     // azul médio (cards)
+    static readonly Color CARD2 = Color.FromArgb(26, 56, 138);     // azul mais claro (inner)
+    static readonly Color ACCENT= Color.FromArgb(80, 160, 255);    // azul elétrico
     static readonly Color GREEN = Color.FromArgb(34, 197, 94);
-    static readonly Color RED = Color.FromArgb(239, 68, 68);
+    static readonly Color RED   = Color.FromArgb(239, 68, 68);
     static readonly Color AMBER = Color.FromArgb(245, 158, 11);
-    static readonly Color TEXT = Color.FromArgb(230, 230, 230);
-    static readonly Color DIM = Color.FromArgb(140, 140, 140);
-    static readonly Color BORDER = Color.FromArgb(55, 55, 58);
+    static readonly Color TEXT  = Color.FromArgb(230, 235, 255);   // branco-azulado
+    static readonly Color DIM   = Color.FromArgb(150, 170, 210);   // cinza-azulado
+    static readonly Color BORDER= Color.FromArgb(40, 80, 160);
 
     Label lblStatus;
     Label lblIp;
@@ -29,7 +29,7 @@ public class ServerForm : Form
     Button btnStop;
     Label lblVersion;
 
-    // v1.9.0: runtime controls for scale and quality
+    // runtime controls for scale and quality
     TrackBar trkScale;
     Label lblScaleVal;
     TrackBar trkQuality;
@@ -39,8 +39,8 @@ public class ServerForm : Form
 
     public ServerForm()
     {
-        Text = "MirrorX Server v1.9.0";
-        Size = new Size(520, 780);
+        Text = "MirrorX Server v1.9.1";
+        Size = new Size(520, 800);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = BG;
         ForeColor = TEXT;
@@ -62,7 +62,7 @@ public class ServerForm : Form
         y += 40;
 
         var sub = new Label {
-            Text = "v1.9.0 \u2022 Dark mode",
+            Text = "v1.9.1 \u2022 Touchpad de Tela Cheia",
             Font = new Font("Segoe UI", 9),
             ForeColor = DIM,
             Location = new Point(16, y),
@@ -73,10 +73,10 @@ public class ServerForm : Form
 
         // CARD 1 - Servidor
         y = AddCard("SERVIDOR", y, cardBody => {
-            lblStatus = MakeRow("Status", "Iniciando...", DIM, cardBody, 0);
-            lblIp = MakeRow("IP Local", "Detectando...", DIM, cardBody, 1);
-            lblPorts = MakeRow("Portas", "8080, 9900, 7777", DIM, cardBody, 2);
-            lblFirewall = MakeRow("Firewall", "Desconhecido", DIM, cardBody, 3);
+            lblStatus  = MakeRow("Status",   "Iniciando...",      DIM,   cardBody, 0);
+            lblIp      = MakeRow("IP Local", "Detectando...",     DIM,   cardBody, 1);
+            lblPorts   = MakeRow("Portas",   "8080, 9900, 7777", DIM,   cardBody, 2);
+            lblFirewall= MakeRow("Firewall", "Desconhecido",      DIM,   cardBody, 3);
         });
         y += 8;
 
@@ -109,31 +109,31 @@ public class ServerForm : Form
         });
         y += 8;
 
-        // CARD 3 - Settings (v1.9.0: runtime scale/quality)
-        y = AddCard("CONFIGURACAO", y, cardBody => {
-            // Scale slider
-            var lblScale = new Label {
+        // CARD 3 - CONFIGURAÇÃO (v1.9.1: fundo azul, título acentuado, Scale=100%, Quality=45)
+        y = AddCard("CONFIGURAÇÃO", y, cardBody => {
+            // ── Escala ──────────────────────────────────────────────────
+            var lblScaleLbl = new Label {
                 Text = "Escala:",
                 Font = new Font("Segoe UI", 10),
                 ForeColor = DIM,
-                Location = new Point(12, 8),
+                Location = new Point(12, 10),
                 AutoSize = true
             };
-            cardBody.Controls.Add(lblScale);
+            cardBody.Controls.Add(lblScaleLbl);
 
             lblScaleVal = new Label {
-                Text = "75%",
+                Text = "100%",
                 Font = new Font("Segoe UI Semibold", 10),
                 ForeColor = ACCENT,
-                Location = new Point(70, 8),
-                Width = 50
+                Location = new Point(75, 10),
+                Width = 55
             };
             cardBody.Controls.Add(lblScaleVal);
 
             trkScale = new TrackBar {
-                Minimum = 25, Maximum = 100, Value = 75, TickFrequency = 5,
-                Location = new Point(130, 4),
-                Size = new Size(cardBody.Width - 180, 36),
+                Minimum = 25, Maximum = 100, Value = 100, TickFrequency = 5,
+                Location = new Point(138, 5),
+                Size = new Size(cardBody.Width - 188, 36),
                 BackColor = CARD2, ForeColor = ACCENT,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -144,29 +144,29 @@ public class ServerForm : Form
             };
             cardBody.Controls.Add(trkScale);
 
-            // Quality slider
-            var lblQuality = new Label {
+            // ── Qualidade ────────────────────────────────────────────────
+            var lblQualityLbl = new Label {
                 Text = "Qualidade:",
                 Font = new Font("Segoe UI", 10),
                 ForeColor = DIM,
-                Location = new Point(12, 44),
+                Location = new Point(12, 50),
                 AutoSize = true
             };
-            cardBody.Controls.Add(lblQuality);
+            cardBody.Controls.Add(lblQualityLbl);
 
             lblQualityVal = new Label {
-                Text = "30",
+                Text = "45",
                 Font = new Font("Segoe UI Semibold", 10),
                 ForeColor = ACCENT,
-                Location = new Point(80, 44),
+                Location = new Point(94, 50),
                 Width = 40
             };
             cardBody.Controls.Add(lblQualityVal);
 
             trkQuality = new TrackBar {
-                Minimum = 1, Maximum = 100, Value = 30, TickFrequency = 5,
-                Location = new Point(130, 40),
-                Size = new Size(cardBody.Width - 180, 36),
+                Minimum = 1, Maximum = 100, Value = 45, TickFrequency = 5,
+                Location = new Point(138, 45),
+                Size = new Size(cardBody.Width - 188, 36),
                 BackColor = CARD2, ForeColor = ACCENT,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -196,7 +196,7 @@ public class ServerForm : Form
         });
         y += 8;
 
-        // Botoes
+        // Botões
         var btnPanel = new Panel {
             Location = new Point(16, y),
             Size = new Size(ClientSize.Width - 32, 50),
@@ -221,12 +221,12 @@ public class ServerForm : Form
         btnPanel.Controls.Add(btnStop);
 
         lblVersion = new Label {
-            Text = "v1.9.0",
+            Text = "v1.9.1",
             Font = new Font("Segoe UI", 8),
             ForeColor = DIM,
             Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
             AutoSize = true,
-            Location = new Point(ClientSize.Width - 50, ClientSize.Height - 20)
+            Location = new Point(ClientSize.Width - 52, ClientSize.Height - 22)
         };
         Controls.Add(lblVersion);
 
@@ -280,7 +280,7 @@ public class ServerForm : Form
         var lbl = new Label {
             Text = label + ":",
             Font = new Font("Segoe UI", 10),
-            ForeColor = DIM,
+            ForeColor = Color.FromArgb(150, 170, 210),
             Location = new Point(14, rowY),
             Width = 100
         };
@@ -302,7 +302,7 @@ public class ServerForm : Form
         var b = new Button {
             Text = text,
             FlatStyle = FlatStyle.Flat,
-            BackColor = CARD2,
+            BackColor = Color.FromArgb(26, 56, 138),
             ForeColor = accent,
             Font = new Font("Segoe UI Semibold", 10, FontStyle.Bold),
             Size = new Size(220, 42),

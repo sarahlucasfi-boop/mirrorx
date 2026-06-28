@@ -4,7 +4,39 @@
 ╚══════════════════════════════════════════════════════════════════╝
 
 ═══════════════════════════════════════════════════════════════════
-v1.0.0 — 16/06/2026
+v1.9.1 — 28/06/2026
+═══════════════════════════════════════════════════════════════════
+  Touchpad de Tela Cheia + Janela de Configuração Azul
+
+  APK Android:
+    ✅ Touchpad de Tela Cheia: toda a superfície do display é sensor
+       de entrada (igual ao touchpad de notebook / scroll de browser)
+    ✅ Movimento relativo: o delta X e Y são enviados para o servidor
+       sem dependência de coordenada absoluta — cursor flui naturalmente
+    ✅ 1 dedo arrastar = mover cursor; toque rápido (<280ms) = clique L
+    ✅ 2 dedos arrastar vertical = scroll da roda do mouse
+    ✅ Removido joystick circular (TrackballCompact) — área de botões
+       L/R/↑/↓ mantida na barra inferior, sem obstáculo na tela
+    ✅ Slider de Sensibilidade (0.3×–4.0×) e Qualidade (20–95) na barra
+    ✅ Texto indicativo "TOUCHPAD ATIVO" quando sem vídeo
+    ✅ Versão APK: 1.9.1 (versionCode 37)
+
+  Servidor C# (.exe):
+    ✅ Janela de configuração com fundo AZUL ESCURO para distinção visual
+    ✅ Card renomeado para "CONFIGURAÇÃO" (com acento correto)
+    ✅ Slider Escala padrão = 100% (antes 75%)
+    ✅ Slider Qualidade padrão = 45 (antes 30)
+    ✅ Recepção de movimento relativo: {t:"m",x:dx,y:dy} agora executa
+       MoveMouseRelative() em vez de MoveMouseAbsolute() — coordena
+       corretamente com o touchpad de tela cheia do APK
+    ✅ Versão do servidor: 1.9.1
+
+  Arquivos entregues:
+    📱 MirrorX_v1.9.1.apk
+    🖥️ MirrorXServer_v1.9.1.exe
+    🖥️ MirrorXServer_v1.9.1_SelfContained.exe
+
+
 ═══════════════════════════════════════════════════════════════════
   Lançamento inicial — Display Only
 
