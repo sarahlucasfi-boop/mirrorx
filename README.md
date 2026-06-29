@@ -46,7 +46,7 @@ New-NetFirewallRule -DisplayName "MirrorX" -Direction Inbound -Protocol TCP -Loc
 
 ### 2. APK no Tablet
 
-Baixe `MirrorX_v1.7.0.apk` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases), instale no tablet e abra.
+Baixe `MirrorX_v2.0.2.apk` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases), instale no tablet e abra.
 
 Digite o IP do PC e conecte.
 
