@@ -1,27 +1,31 @@
-# MirrorX v1.7.0
+# MirrorX v2.0.2
 
 **Transforme qualquer tablet Android em uma segunda tela sem fio para Windows.**
 
-Sem cabos. Conexão direta via WiFi na rede local. Código aberto.
+Sem cabos. Conexão direta via WiFi na rede local. Código aberto. 100% gratuito.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-blue)](https://github.com)
-[![Version](https://img.shields.io/badge/version-1.7.0-6366f1)](https://github.com)
+[![Android](https://img.shields.io/badge/Android-8%2B-green)](https://github.com)
+[![Version](https://img.shields.io/badge/version-2.0.2-6366f1)](https://github.com)
+[![100% Free](https://img.shields.io/badge/100%25-Free-brightgreen)](https://github.com)
 
 ---
 
-## Free vs Pro
+## Por que MirrorX?
 
-| Funcionalidade | Free | Pro (R$10) |
-|---|---|---|
-| Espelhamento de tela | ✅ | ✅ |
-| Toque → Mouse | ✅ | ✅ |
-| Cursor visível no tablet | ✅ | ✅ |
-| Reconexão automática | ✅ | ✅ |
-| FPS | 24 | 30 / 60 |
-| Modo Estender (2º monitor) | ❌ | ✅ |
+| Funcionalidade | MirrorX | AnyDesk | TeamViewer |
+|---|---|---|---|
+| Conexão local | ✅ Ilimitada | ✅ | ✅ |
+| Conexão remota | ✅ Ilimitada | 1h/sessão | 5min/sessão |
+| Resolução máxima | ✅ 4K | 1080p | 720p |
+| FPS máximo | ✅ 60 | 30 | 25 |
+| Código aberto | ✅ GPLv3 | ❌ Fechado | ❌ Fechado |
+| **Preço** | ✅ **R$0 — Gratuito** | R$300+/ano | R$500+/ano |
+| Sem cadastro | ✅ Sim | ❌ | ❌ |
+| Sem limites | ✅ Sim | ❌ | ❌ |
 
-**Desbloqueio instantâneo** — sem cadastro, sem assinatura. Toque em 🔒30Hz no app, digite o código incluso no .zip da release, e pronto. Pra sempre.
+**100% gratuito e open source** — sem premium, sem limitações, sem assinatura. Apenas baixe e use.
 
 ---
 
@@ -52,11 +56,11 @@ A tela do PC aparece no tablet. Toque na tela → mouse move no PC.
 
 ---
 
-## Modo Estender (Pro)
+## Modo Estender
 
 O tablet vira um segundo monitor real — dá pra arrastar janelas pra lá.
 
-1. Instalar o VDD:
+1. Instalar o VDD (Virtual Display Driver):
 ```powershell
 winget install --id=VirtualDrivers.Virtual-Display-Driver -e
 ```
