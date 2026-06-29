@@ -1,10 +1,48 @@
-# Build outputs & publish folders
+# MirrorX - .gitignore
+# =====================
+
+# Build artifacts (server)
 server_dotnet/bin/
 server_dotnet/obj/
-server_dotnet/publish_*/
+server_dotnet/publish*/
+server_dotnet/DotNet/
+*.exe
+*.dll
+*.pdb
+*.cache
+*.deps.json
+*.runtimeconfig.json
+
+# Build artifacts (Android)
+android_source/app/build/
+android_source/build/
+android_source/.gradle/
+android_source/dist/
+*.apk
+*.aab
+*.idsig
 
 # IDE
 .idea/
 *.suo
 *.user
-.vs/
+*.vs/
+.vscode/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Gradle
+android_source/gradle-*.zip
+!android_source/gradle/wrapper/gradle-wrapper.jar
+!android_source/gradle/wrapper/gradle-wrapper.properties
+
+# Logs
+*.log
+logs/
+
+# Temp
+*.tmp
+tmp/
