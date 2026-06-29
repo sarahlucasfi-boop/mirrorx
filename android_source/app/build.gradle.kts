@@ -33,8 +33,8 @@ android {
         applicationId = "com.mirrorx.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 42
-        versionName = "1.9.7"
+        versionCode = 47
+        versionName = "2.0.2"
     }
 
     buildTypes {

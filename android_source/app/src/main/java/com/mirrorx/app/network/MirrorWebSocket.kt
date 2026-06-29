@@ -51,6 +51,18 @@ class MirrorWebSocket {
     private val _currentFrame = MutableStateFlow<Bitmap?>(null)
     val currentFrame: StateFlow<Bitmap?> = _currentFrame
 
+    // v2.0.0: Dirty region renderer — frame buffer permanente para partial updates
+    private var frameBuffer: Bitmap? = null
+    private var frameBufferWidth: Int = 0
+    private var frameBufferHeight: Int = 0
+
+    // v2.0.0: Bandwidth savings tracking para partial updates
+    private val _bandwidthSavings = MutableStateFlow(0)
+    val bandwidthSavings: StateFlow<Int> = _bandwidthSavings
+    
+    private var totalFrameBytes: Long = 0
+    private var partialBytesReceived: Long = 0
+
     // v1.4.1: cursor position confirmed by the server. Used by the ghost
     // cursor overlay to know where the PC cursor actually is. The local
     // predicted cursor (from touch) interpolates toward this value.
@@ -93,6 +105,10 @@ class MirrorWebSocket {
     )
     private val _serverAdapt = MutableStateFlow(AdaptInfo())
     val serverAdapt: StateFlow<AdaptInfo> = _serverAdapt
+
+    // v2.0.0: HUD enviado pelo servidor via JSON "hud_v2" a cada 2s.
+    private val _hud = MutableStateFlow<ServerHud?>(null)
+    val hud: StateFlow<ServerHud?> = _hud
 
     // v1.7.2: Multi-monitor support
     data class MonitorInfo(
@@ -212,6 +228,10 @@ class MirrorWebSocket {
                                 fps = json.optDouble("fps", 0.0).toFloat()
                             )
                         }
+                        "hud_v2" -> {
+                            // v2.0.0: telemetria do servidor (codec, bitrate, fps).
+                            ServerHud.parse(text)?.let { _hud.value = it }
+                        }
                         "cursor_pos" -> {
                             // v1.4.1: server reports the actual PC cursor
                             // position. Coordinates are in PC screen pixels.
@@ -219,6 +239,13 @@ class MirrorWebSocket {
                                 json.optDouble("x", 0.0).toFloat(),
                                 json.optDouble("y", 0.0).toFloat()
                             )
+                        }
+                        "ping" -> {
+                            try {
+                                webSocket.send(JSONObject().apply {
+                                    put("type", "pong")
+                                }.toString())
+                            } catch (_: Exception) {}
                         }
                     }
                 } catch (_: Exception) {}
@@ -252,14 +279,18 @@ class MirrorWebSocket {
                         return decodeFrameLegacy(data)
                     }
 
+                    // v2.0.0: Check for type=3 (partial frame update / dirty regions)
+                    val type = data[0].toInt() and 0xFF
+                    if (type == 0x03) {
+                        return handlePartialUpdate(data)
+                    }
+
                     val length = ByteBuffer.wrap(data, 1, 4).int
                     val mouseXRaw = ByteBuffer.wrap(data, 5, 2).short.toInt() and 0xFFFF
                     val mouseYRaw = ByteBuffer.wrap(data, 7, 2).short.toInt() and 0xFFFF
                     val cursorVis = data[9].toInt() != 0
                     val cursorInBounds = data[10].toInt() != 0  // v1.8: reserved byte = in_bounds
-                    val jpegData = data.copyOfRange(11, 11 + length.coerceAtMost(data.size - 11))
-
-                    val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
+                    val bitmap = BitmapFactory.decodeByteArray(data, 11, length.coerceAtMost(data.size - 11))
                     if (bitmap != null) {
                         _currentFrame.value = bitmap
                         _cursorVisible.value = cursorVis
@@ -296,8 +327,7 @@ class MirrorWebSocket {
                 val length = ByteBuffer.wrap(data, 1, 4).int
                 val mouseXRaw = ByteBuffer.wrap(data, 5, 2).short.toInt() and 0xFFFF
                 val mouseYRaw = ByteBuffer.wrap(data, 7, 2).short.toInt() and 0xFFFF
-                val jpegData = data.copyOfRange(9, 9 + length.coerceAtMost(data.size - 9))
-                val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
+                val bitmap = BitmapFactory.decodeByteArray(data, 9, length.coerceAtMost(data.size - 9))
                 if (bitmap != null) {
                     _currentFrame.value = bitmap
                     val info = _screenInfo.value
@@ -311,6 +341,142 @@ class MirrorWebSocket {
                         normY = (mouseYRaw.toFloat() / 1080f).coerceIn(0f, 1f)
                     }
                     _mousePos.value = androidx.compose.ui.geometry.Offset(normX, normY)
+                }
+            }
+
+            // v2.0.0: Dirty region renderer — handles type=0x03 partial frame updates
+            private fun handlePartialUpdate(data: ByteArray) {
+                // Header format (16 bytes big-endian):
+                //   type(1) + frameId(4) + totalTiles(2) + dirtyTiles(2) +
+                //   screenWidth(2) + screenHeight(2) + tileWidth(2) + tileHeight(2)
+                if (data.size < 17) return  // Need at least type + 16 bytes header
+                
+                val buf = ByteBuffer.wrap(data).order(java.nio.ByteOrder.BIG_ENDIAN)
+                
+                // Skip type byte
+                buf.position(1)
+                
+                val frameId = buf.getInt()
+                val totalTiles = buf.getShort().toInt() and 0xFFFF
+                val dirtyTiles = buf.getShort().toInt() and 0xFFFF
+                val screenWidth = buf.getShort().toInt() and 0xFFFF
+                val screenHeight = buf.getShort().toInt() and 0xFFFF
+                val tileWidth = buf.getShort().toInt() and 0xFFFF
+                val tileHeight = buf.getShort().toInt() and 0xFFFF
+                
+                // Validate dimensions
+                if (screenWidth <= 0 || screenHeight <= 0 || tileWidth <= 0 || tileHeight <= 0) {
+                    return
+                }
+                
+                // Initialize or resize frameBuffer if needed
+                if (frameBuffer == null || frameBufferWidth != screenWidth || frameBufferHeight != screenHeight) {
+                    frameBuffer?.recycle()
+                    frameBuffer = Bitmap.createBitmap(screenWidth, screenHeight, Bitmap.Config.ARGB_8888)
+                    frameBufferWidth = screenWidth
+                    frameBufferHeight = screenHeight
+                }
+                
+                val fb = frameBuffer ?: return
+                
+                // Track bandwidth: compare full frame size vs partial data received
+                val fullFrameBytes = screenWidth * screenHeight * 4  // ARGB_8888
+                totalFrameBytes += fullFrameBytes
+                
+                // Parse and apply each dirty tile
+                // Each tile: tileX(2) + tileY(2) + tileSize(4) + tileData(tileSize bytes)
+                var offset = 17  // Start after header
+                val canvas = android.graphics.Canvas(fb)
+                var bytesReceived = 0
+                
+                for (i in 0 until dirtyTiles) {
+                    if (offset + 8 > data.size) break  // Not enough data for tile header
+                    
+                    val tileX = ByteBuffer.wrap(data, offset, 2).order(java.nio.ByteOrder.BIG_ENDIAN).getShort().toInt() and 0xFFFF
+                    val tileY = ByteBuffer.wrap(data, offset + 2, 2).order(java.nio.ByteOrder.BIG_ENDIAN).getShort().toInt() and 0xFFFF
+                    val tileSize = ByteBuffer.wrap(data, offset + 4, 4).order(java.nio.ByteOrder.BIG_ENDIAN).getInt()
+                    
+                    offset += 8
+                    
+                    if (tileSize <= 0 || offset + tileSize > data.size) break
+                    
+                    bytesReceived += 8 + tileSize
+                    partialBytesReceived += 8 + tileSize
+                    
+                    // Decode tile data (JPEG or raw RGB)
+                    val tileData = ByteArray(tileSize)
+                    System.arraycopy(data, offset, tileData, 0, tileSize)
+                    
+                    // Check if it's JPEG (starts with FF D8)
+                    val tileBitmap = if (tileSize >= 2 && (tileData[0].toInt() and 0xFF) == 0xFF && (tileData[1].toInt() and 0xFF) == 0xD8) {
+                        // JPEG encoded tile
+                        BitmapFactory.decodeByteArray(tileData, 0, tileSize)
+                    } else {
+                        // Raw RGB (24-bit) or RGBA (32-bit) data
+                        val pixelsPerRow = tileWidth
+                        if (tileSize == tileWidth * tileHeight * 3) {
+                            // 24-bit RGB
+                            val tempBitmap = Bitmap.createBitmap(tileWidth, tileHeight, Bitmap.Config.ARGB_8888)
+                            for (y in 0 until tileHeight) {
+                                for (x in 0 until tileWidth) {
+                                    val idx = (y * tileWidth + x) * 3
+                                    if (idx + 2 < tileSize) {
+                                        val r = tileData[idx].toInt() and 0xFF
+                                        val g = tileData[idx + 1].toInt() and 0xFF
+                                        val b = tileData[idx + 2].toInt() and 0xFF
+                                        tempBitmap.setPixel(x, y, android.graphics.Color.rgb(r, g, b))
+                                    }
+                                }
+                            }
+                            tempBitmap
+                        } else if (tileSize == tileWidth * tileHeight * 4) {
+                            // 32-bit RGBA
+                            val tempBitmap = Bitmap.createBitmap(tileWidth, tileHeight, Bitmap.Config.ARGB_8888)
+                            for (y in 0 until tileHeight) {
+                                for (x in 0 until tileWidth) {
+                                    val idx = (y * tileWidth + x) * 4
+                                    if (idx + 3 < tileSize) {
+                                        val r = tileData[idx].toInt() and 0xFF
+                                        val g = tileData[idx + 1].toInt() and 0xFF
+                                        val b = tileData[idx + 2].toInt() and 0xFF
+                                        val a = tileData[idx + 3].toInt() and 0xFF
+                                        tempBitmap.setPixel(x, y, android.graphics.Color.argb(a, r, g, b))
+                                    }
+                                }
+                            }
+                            tempBitmap
+                        } else {
+                            null
+                        }
+                    }
+                    
+                    // Composite tile onto frameBuffer
+                    if (tileBitmap != null) {
+                        val destRect = android.graphics.Rect(tileX, tileY, tileX + tileBitmap.width, tileY + tileBitmap.height)
+                        canvas.drawBitmap(tileBitmap, null, destRect, null)
+                        tileBitmap.recycle()
+                    }
+                    
+                    offset += tileSize
+                }
+                
+                // Calculate bandwidth savings percentage
+                if (partialBytesReceived > 0 && totalFrameBytes > 0) {
+                    val savings = ((1.0 - partialBytesReceived.toDouble() / totalFrameBytes.toDouble()) * 100).toInt().coerceIn(0, 100)
+                    _bandwidthSavings.value = savings
+                }
+                
+                // Emit the updated frameBuffer as currentFrame
+                _currentFrame.value = fb
+                
+                // Update FPS counter
+                frameCount++
+                val now = System.currentTimeMillis()
+                val elapsed = now - lastFpsTime
+                if (elapsed >= 1000) {
+                    _fps.value = (frameCount * 1000 / elapsed).toInt()
+                    frameCount = 0
+                    lastFpsTime = now
                 }
             }
 
@@ -351,6 +517,15 @@ class MirrorWebSocket {
         _connectionState.value = ConnectionState.Disconnected
         _currentFrame.value = null
         _screenInfo.value = ScreenInfo.Unknown
+        
+        // v2.0.0: limpiar frameBuffer al desconectar
+        frameBuffer?.recycle()
+        frameBuffer = null
+        frameBufferWidth = 0
+        frameBufferHeight = 0
+        totalFrameBytes = 0
+        partialBytesReceived = 0
+        _bandwidthSavings.value = 0
     }
 
     // v1.5.9: auto-reconnect state
@@ -377,6 +552,9 @@ class MirrorWebSocket {
             put("tilt", tilt.toDouble())
             put("tool", tool)
             put("buttons", buttons)
+            if (buttons == 2 || (buttons and 2) != 0) {
+                put("button", "right")
+            }
         }
         ws?.send(json.toString())
         onTouchEvent?.invoke(x, y, action)
@@ -502,6 +680,24 @@ class MirrorWebSocket {
     fun sendHermesClick(button: Int) {
         val json = JSONObject().apply {
             put("t", "c")
+            put("b", button)
+        }
+        ws?.send(json.toString())
+    }
+
+    /** Mouse down: {"t":"d","b":<int>} */
+    fun sendHermesMouseDown(button: Int) {
+        val json = JSONObject().apply {
+            put("t", "d")
+            put("b", button)
+        }
+        ws?.send(json.toString())
+    }
+
+    /** Mouse up: {"t":"u","b":<int>} */
+    fun sendHermesMouseUp(button: Int) {
+        val json = JSONObject().apply {
+            put("t", "u")
             put("b", button)
         }
         ws?.send(json.toString())

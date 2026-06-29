@@ -1,2 +1,0 @@
-C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish_singlefile\MirrorXServer.pdb
-C:\Users\adm\Documents\GitHub\mirrorx\server_dotnet\publish_singlefile\MirrorXServer.exe

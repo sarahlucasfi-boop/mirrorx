@@ -1,232 +1,309 @@
 package com.mirrorx.app.touch
 
+import android.os.SystemClock
 import android.view.MotionEvent
+import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
- * Touch event handler for MirrorX.
+ * MirrorX v2.0.1 — TouchHandler reescrito do zero.
  *
- * v1.0: code was ready but DISABLED (display-only mode).
- * v1.1: ENABLED. OFF/CURSOR/CLICK_ONLY/DRAW modes.
- * v1.2: Stylus-aware — detects TOOL_TYPE_STYLUS / FINGER / ERASER,
- *       reads pressure (0..1) and tilt (0..90°), performs palm
- *       rejection (ignores wide finger contacts while stylus is active),
- *       and exposes a callback for the cursor-overlay logic to hide
- *       the cursor when stylus is in use.
+ * Modos:
+ *  - CURSOR   : emula mouse. Toque move o cursor, tap = click,
+ *               long-press = click direito, drag = clique-segurar.
+ *  - PEN      : caneta. Toque = down, move = move, up = up.
+ *               Passa pressure/tilt para o PC renderizar com espessura.
+ *  - DRAW     : modo pintura. Igual ao PEN mas força pressure=constante
+ *               se finger touch (fingertip painting).
+ *  - OFF      : nada é enviado.
+ *  - HERMES   : preservado da v1.x (compatibilidade HermesActivity).
+ *
+ * Design:
+ *  - Toda coord é normalizada (0..1) no espaço do servidor.
+ *  - Stylus físico (S Pen etc.) tem prioridade em PEN/DRAW.
+ *  - Tap: deslocamento < 2% da tela em < 400ms.
+ *  - Long-press: 600ms sem movimento > 1.5% da tela.
+ *  - Pinch 2 dedos: zoom (escala + centro).
+ *  - Palm rejection ativo quando stylus está na tela.
  */
 class TouchHandler(
-    private val onSendTouch: (Float, Float, String, Float, Float, String, Int) -> Unit,
-    private val onSendTouchPath: (List<TouchPathCollector.Point>, Float, Float, String, Int) -> Unit,
-    // v1.4.0: WebSocket binary path (faster than JSON)
-    private val onSendTouchPathBinary: (List<TouchPathCollector.Point>, String, Int) -> Unit = { _, _, _ -> },
-    // v1.4.0: pinch-to-zoom (scale, centerX, centerY)
-    private val onSendPinch: (Float, Float, Float) -> Unit = { _, _, _ -> }
+    private val onSendTouch: (x: Float, y: Float, action: String, pressure: Float, tilt: Float, tool: String, buttons: Int) -> Unit = { _,_,_,_,_,_,_ -> },
+    private val onSendTouchPath: (points: List<TouchPathCollector.Point>, pressure: Float, tilt: Float, tool: String, buttons: Int) -> Unit = { _,_,_,_,_ -> },
+    private val onSendTouchPathBinary: (points: List<TouchPathCollector.Point>, tool: String, buttons: Int) -> Unit = { _,_,_ -> },
+    private val onSendPinch: (scale: Float, cx: Float, cy: Float) -> Unit = { _,_,_ -> },
 ) {
-    private var isDown = false
-    private var lastX = 0f
-    private var lastY = 0f
-    // v1.4.1: while true, the local ghost cursor should follow the finger
-    // (not the server's confirmed cursor). Read by MirrorScreen to decide
-    // whether to override the ghost-cursor position with the remote one.
+
+    /** Estado atual visível pelo caller. */
+    var mode: TouchMode = TouchMode.OFF
+        private set
+
+    /** true enquanto o usuário está com o dedo/caneta pressionando. */
     var isPressing: Boolean = false
         private set
-    // v1.4.1: invoked on every cursor-mode ACTION_DOWN / ACTION_MOVE with
-    // normalized (x, y) coordinates (0..1). Lets MirrorScreen update the
-    // ghost cursor immediately, without waiting for the next frame.
+
+    /** Callback para o ghost-cursor (CURSOR mode): move o cursor local sem esperar RTT. */
     var onCursorMove: ((Float, Float) -> Unit)? = null
-    // v1.2.3: track touch-start position for tap detection in CURSOR mode
-    private var touchStartX = 0f
-    private var touchStartY = 0f
-    private var touchStartTime = 0L
-    // v1.3.1: collect touch trajectory for smooth cursor movement
-    private val pathCollector = TouchPathCollector()
-    // v1.4.0: pinch state — track 2-finger distance
-    private var pinchActive = false
-    private var lastPinchDist = 0f
-    var mode = TouchMode.OFF
-        private set
 
-    /**
-     * If true, finger touches are rejected while the user is using a stylus
-     * (palm rejection — typical for note-taking apps).
-     */
-    var palmRejection = true
-        set(value) { field = value }
-
-    /** Callback invoked when the active tool changes (stylus vs finger). */
+    /** Callback quando o tool muda (stylus/eraser/finger) — usado pra esconder cursor. */
     var onToolChanged: ((String) -> Unit)? = null
-    private var lastReportedTool: String = "finger"
+
+    /** Palm rejection ativo (rejeita dedos quando stylus está presente). */
+    var palmRejection: Boolean = true
+        set(v) { field = v }
 
     enum class TouchMode {
-        OFF,        // no events
-        CURSOR,     // mouse emulation
-        CLICK_ONLY, // pen/stylus mode — taps = clicks
-        DRAW,       // painting mode
-        HERMES      // v1.5.9: trackball overlay mode (PC screen + mouse)
+        OFF, CURSOR, CLICK_ONLY, DRAW, PEN, HERMES
     }
 
-    fun setMode(newMode: TouchMode) {
-        mode = newMode
+    fun setMode(m: TouchMode) {
+        if (m != mode) {
+            mode = m
+            resetState()
+        }
     }
 
-    /**
-     * Called by the Compose pointerInput on every motion event.
-     * @param event the synthesized MotionEvent
-     * @param viewWidth  pixel width of the captured area
-     * @param viewHeight pixel height of the captured area
-     * @return true if the event was consumed
-     */
+    // ----- estado interno -----
+    private var downTimeMs = 0L
+    private var downX = 0f
+    private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    private var lastTool = "finger"
+    private var stylusActive = false
+    private var longPressFired = false
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val longPressRunnable = Runnable {
+        if (isPressing && !longPressFired) {
+            val dx = abs(lastX - downX)
+            val dy = abs(lastY - downY)
+            if (hypot(dx, dy) < 0.015f) {   // 1.5% tolerância
+                longPressFired = true
+                onSendTouch(lastX, lastY, "click", 1f, 0f, lastTool, 2)  // botão direito
+            }
+        }
+    }
+
+    private val pathCollector = TouchPathCollector()
+
+    // Pinch
+    private var pinchBaseDist = 0f
+    private var pinchActive = false
+
+    private fun resetState() {
+        isPressing = false
+        downTimeMs = 0L
+        downX = 0f; downY = 0f
+        lastX = 0f; lastY = 0f
+        longPressFired = false
+        handler.removeCallbacks(longPressRunnable)
+        pathCollector.flushPath()
+        pinchActive = false
+    }
+
+    // ----- protocolo de entrada -----
     fun handleTouchEvent(event: MotionEvent, viewWidth: Int, viewHeight: Int): Boolean {
         if (mode == TouchMode.OFF) return false
+        if (mode == TouchMode.HERMES) return false   // HermesActivity tem seu próprio Touchpad
         if (viewWidth <= 0 || viewHeight <= 0) return false
 
-        val pointerIndex = if (event.actionIndex in 0 until event.pointerCount)
-            event.actionIndex else 0
+        // --- Pinch 2 dedos ---
+        when (event.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount >= 2) {
+                    pinchBaseDist = distBetween(event, 0, 1)
+                    pinchActive = pinchBaseDist > 5f
+                    pathCollector.flushPath()
+                    cancelLongPress()
+                    return true
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (pinchActive && event.pointerCount >= 2) {
+                    val d = distBetween(event, 0, 1)
+                    if (pinchBaseDist > 5f) {
+                        val scale = (d / pinchBaseDist).coerceIn(0.1f, 10f)
+                        val cx = ((event.getX(0) + event.getX(1)) / 2f / viewWidth).coerceIn(0f, 1f)
+                        val cy = ((event.getY(0) + event.getY(1)) / 2f / viewHeight).coerceIn(0f, 1f)
+                        onSendPinch(scale, cx, cy)
+                        pinchBaseDist = d
+                    }
+                    return true
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (event.pointerCount <= 2) {
+                    pinchActive = false
+                    pinchBaseDist = 0f
+                }
+            }
+        }
+        if (pinchActive) return true
 
-        val toolType = event.getToolType(pointerIndex)
+        // --- Single touch ---
+        val idx = event.actionIndex.coerceIn(0, event.pointerCount - 1)
+        val toolType = event.getToolType(idx)
         val tool = when (toolType) {
             MotionEvent.TOOL_TYPE_STYLUS -> "stylus"
             MotionEvent.TOOL_TYPE_ERASER -> "eraser"
-            MotionEvent.TOOL_TYPE_MOUSE -> "mouse"
+            MotionEvent.TOOL_TYPE_MOUSE  -> "mouse"
             else -> "finger"
         }
-        // Notify if tool changed (used to hide cursor on stylus)
-        if (tool != lastReportedTool) {
-            lastReportedTool = tool
+
+        if (tool != lastTool) {
+            lastTool = tool
             onToolChanged?.invoke(tool)
         }
+        stylusActive = event.isStylusInProximity()
 
-        // Palm rejection: if a finger contact is too wide while a stylus
-        // is in use, ignore it.
-        if (palmRejection && tool == "finger" && event.pressure <= 0.01f) {
-            // Too soft, likely a palm
-            return false
+        // Palm rejection
+        if (palmRejection && tool == "finger" && stylusActive) {
+            return true   // rejeita, mas consome o evento
         }
 
-        val xRatio = (event.getX(pointerIndex) / viewWidth).coerceIn(0f, 1f)
-        val yRatio = (event.getY(pointerIndex) / viewHeight).coerceIn(0f, 1f)
-        val pressure = event.getPressure(pointerIndex).coerceIn(0f, 1f)
-        // Tilt is in degrees; API returns 0..90 (90 = perpendicular to screen)
-        val tilt = event.getAxisValue(MotionEvent.AXIS_TILT, pointerIndex)
-            .let { Math.toDegrees(it.toDouble()).toFloat() }
-            .coerceIn(0f, 90f)
-        // Buttons: 1 = primary, 2 = secondary, 4 = tertiary
+        val x = (event.getX(idx) / viewWidth).coerceIn(0f, 1f)
+        val y = (event.getY(idx) / viewHeight).coerceIn(0f, 1f)
+        val pressure = event.getPressure(idx).coerceIn(0f, 1f)
+        val tilt = event.getAxisValue(MotionEvent.AXIS_TILT, idx).coerceIn(0f, 1.57f) * 57.2958f
         val buttons = event.buttonState
 
-        // v1.4.0: pinch-to-zoom detection (2 fingers).
-        // When ACTION_POINTER_DOWN happens, store the distance.
-        // When fingers move, compute new distance and send scale = newDist/oldDist.
-        if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN && event.pointerCount >= 2) {
-            val dx = event.getX(0) - event.getX(1)
-            val dy = event.getY(0) - event.getY(1)
-            lastPinchDist = kotlin.math.hypot(dx, dy)
-            pinchActive = lastPinchDist > 0f
-            // Cancel any in-flight single-touch path
-            pathCollector.flushPath()
-            return true
-        }
-        if (event.actionMasked == MotionEvent.ACTION_POINTER_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            pinchActive = false
-            lastPinchDist = 0f
-        }
-        if (pinchActive && event.pointerCount >= 2) {
-            val dx = event.getX(0) - event.getX(1)
-            val dy = event.getY(0) - event.getY(1)
-            val newDist = kotlin.math.hypot(dx, dy)
-            if (lastPinchDist > 0f && newDist > 0f) {
-                val scale = newDist / lastPinchDist
-                val cx = ((event.getX(0) + event.getX(1)) / 2f / viewWidth).coerceIn(0f, 1f)
-                val cy = ((event.getY(0) + event.getY(1)) / 2f / viewHeight).coerceIn(0f, 1f)
-                onSendPinch(scale, cx, cy)
-            }
-            lastPinchDist = newDist
-            return true
-        }
-
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                isDown = true
-                isPressing = true
-                lastX = xRatio
-                lastY = yRatio
-                // v1.2.3: record touch start for tap-vs-drag detection
-                touchStartX = xRatio
-                touchStartY = yRatio
-                touchStartTime = System.currentTimeMillis()
-                when (mode) {
-                    // v1.3.1: CURSOR = touchpad mode: collect the whole trajectory
-                    // and send it as a compressed path. Start collecting now.
-                    TouchMode.CURSOR -> {
-                        pathCollector.add(xRatio, yRatio)
-                        onSendTouch(xRatio, yRatio, "move", pressure, tilt, tool, buttons)
-                        onCursorMove?.invoke(xRatio, yRatio)
-                    }
-                    TouchMode.DRAW -> onSendTouch(xRatio, yRatio, "down", pressure, tilt, tool, buttons)
-                    TouchMode.HERMES -> { /* Hermes uses its own trackball UI */ }
-                    TouchMode.CLICK_ONLY, TouchMode.OFF -> { /* wait for up */ }
-                }
-            }
+            MotionEvent.ACTION_DOWN -> handleDown(x, y, pressure, tilt, tool, buttons)
+            MotionEvent.ACTION_MOVE -> handleMove(x, y, pressure, tilt, tool, buttons)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> handleUp(x, y, pressure, tilt, tool, buttons, cancel = event.actionMasked == MotionEvent.ACTION_CANCEL)
+            else -> {}
+        }
 
-            MotionEvent.ACTION_MOVE -> {
-                if (!isDown) return false
-                lastX = xRatio
-                lastY = yRatio
-                when (mode) {
-                    TouchMode.CURSOR -> {
-                        // v1.3.1: add point to trajectory. Send a batch as soon as
-                        // enough points are collected or the oldest is older than 50ms,
-                        // so the cursor on the PC stays responsive.
-                        pathCollector.add(xRatio, yRatio)
-                        if (pathCollector.shouldFlush()) {
-                            val path = pathCollector.flushPath()
-                            if (path.size >= 2) {
-                                onSendTouchPath(path, pressure, tilt, tool, buttons)
-                            }
-                        }
-                        // Also send a single move so the PC cursor is never stuck
-                        // if the batch is delayed.
-                        onSendTouch(xRatio, yRatio, "move", pressure, tilt, tool, buttons)
-                        // v1.4.1: update the ghost cursor immediately so the user
-                        // sees their finger moving the cursor on the tablet with
-                        // zero perceived latency.
-                        onCursorMove?.invoke(xRatio, yRatio)
-                    }
-                    TouchMode.DRAW -> onSendTouch(xRatio, yRatio, "drag", pressure, tilt, tool, buttons)
-                    TouchMode.HERMES -> { /* Hermes uses its own trackball UI */ }
-                    TouchMode.CLICK_ONLY, TouchMode.OFF -> { /* ignore movement */ }
-                }
-            }
+        return true
+    }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isDown = false
-                isPressing = false
-                when (mode) {
-                    TouchMode.CURSOR -> {
-                        // v1.3.1: send any remaining trajectory points
-                        val path = pathCollector.flushPath()
-                        if (path.size >= 2) {
-                            onSendTouchPath(path, pressure, tilt, tool, buttons)
-                        }
-                        // v1.2.3: tap detection — if the finger didn't move much
-                        // and the touch was short, treat it as a click.
-                        val dx = xRatio - touchStartX
-                        val dy = yRatio - touchStartY
-                        val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-                        val elapsed = System.currentTimeMillis() - touchStartTime
-                        // Tap threshold: < 2% of screen AND < 400ms
-                        if (dist < 0.02f && elapsed < 400) {
-                            onSendTouch(xRatio, yRatio, "click", pressure, tilt, tool, buttons)
-                        }
-                        // If it was a long press or drag, do nothing — the cursor
-                        // was already positioned by the move events, and no mouse
-                        // button was ever pressed, so there's nothing to release.
-                    }
-                    TouchMode.DRAW -> onSendTouch(xRatio, yRatio, "up", pressure, tilt, tool, buttons)
-                    TouchMode.CLICK_ONLY -> onSendTouch(xRatio, yRatio, "click", pressure, tilt, tool, buttons)
-                    TouchMode.HERMES -> { /* Hermes uses its own trackball UI */ }
-                    TouchMode.OFF -> { /* never reached */ }
-                }
+    private fun MotionEvent.isStylusInProximity(): Boolean {
+        for (i in 0 until pointerCount) {
+            val t = getToolType(i)
+            if (t == MotionEvent.TOOL_TYPE_STYLUS || t == MotionEvent.TOOL_TYPE_ERASER) {
+                return true
             }
         }
-        return true
+        return false
+    }
+
+    // ---- modo-specific handlers ----
+
+    private fun handleDown(x: Float, y: Float, pressure: Float, tilt: Float, tool: String, buttons: Int) {
+        downX = x; downY = y; lastX = x; lastY = y
+        downTimeMs = SystemClock.elapsedRealtime()
+        longPressFired = false
+        isPressing = true
+
+        when (mode) {
+            TouchMode.CURSOR -> {
+                pathCollector.flushPath()
+                pathCollector.add(x, y)
+                onSendTouch(x, y, "move", pressure, tilt, tool, buttons)
+                onCursorMove?.invoke(x, y)
+                scheduleLongPress()
+            }
+            TouchMode.CLICK_ONLY -> {
+                scheduleLongPress()
+            }
+            TouchMode.PEN -> {
+                onSendTouch(x, y, "down", pressure, tilt, tool, buttons)
+            }
+            TouchMode.DRAW -> {
+                val p = if (tool == "finger") 0.7f else pressure   // fingertip = pressão fixa
+                onSendTouch(x, y, "down", p, tilt, tool, buttons)
+            }
+            else -> {}
+        }
+    }
+
+    private fun handleMove(x: Float, y: Float, pressure: Float, tilt: Float, tool: String, buttons: Int) {
+        if (!isPressing) return
+        lastX = x; lastY = y
+
+        // Cancela long-press se movimento é grande
+        if (abs(x - downX) > 0.015f || abs(y - downY) > 0.015f) {
+            cancelLongPress()
+        }
+
+        when (mode) {
+            TouchMode.CURSOR -> {
+                pathCollector.add(x, y)
+                if (pathCollector.shouldFlush()) {
+                    val path = pathCollector.flushPath()
+                    if (path.size >= 2) onSendTouchPathBinary(path, tool, buttons)
+                }
+                onSendTouch(x, y, "move", pressure, tilt, tool, buttons)
+                onCursorMove?.invoke(x, y)
+            }
+            TouchMode.PEN -> {
+                onSendTouch(x, y, "move", pressure, tilt, tool, buttons)
+            }
+            TouchMode.DRAW -> {
+                val p = if (tool == "finger") 0.7f else pressure
+                onSendTouch(x, y, "drag", p, tilt, tool, buttons)
+            }
+            TouchMode.CLICK_ONLY -> { /* espera UP */ }
+            else -> {}
+        }
+    }
+
+    private fun handleUp(x: Float, y: Float, pressure: Float, tilt: Float, tool: String, buttons: Int, cancel: Boolean) {
+        val wasPressing = isPressing
+        isPressing = false
+        cancelLongPress()
+        if (!wasPressing) return
+
+        val dx = abs(x - downX)
+        val dy = abs(y - downY)
+        val dist = hypot(dx, dy)
+        val elapsed = SystemClock.elapsedRealtime() - downTimeMs
+        val wasTap = dist < 0.02f && elapsed < 400
+        val wasLongPress = longPressFired
+
+        when (mode) {
+            TouchMode.CURSOR -> {
+                val path = pathCollector.flushPath()
+                if (path.size >= 2) onSendTouchPathBinary(path, tool, buttons)
+                // Se foi um longo-arraste, já está tudo enviado pelos moves; só não gera click.
+                if (!cancel && wasTap) {
+                    onSendTouch(x, y, "click", pressure, tilt, tool, buttons)
+                } else if (!cancel && !wasLongPress && elapsed >= 600) {
+                    // segurar sem movimento → up do botão direito já disparado no long-press
+                }
+                // Sempre um up final pra garantir (server ignora se não houver down)
+                if (!cancel) onSendTouch(x, y, "up", pressure, tilt, tool, buttons)
+            }
+            TouchMode.CLICK_ONLY -> {
+                if (!cancel) {
+                    if (wasLongPress || wasTap) {
+                        val btn = if (wasLongPress) 2 else buttons   // long-press = botão direito
+                        onSendTouch(x, y, "click", pressure, tilt, tool, btn)
+                    }
+                }
+            }
+            TouchMode.PEN -> {
+                if (!cancel) onSendTouch(x, y, "up", pressure, tilt, tool, buttons)
+            }
+            TouchMode.DRAW -> {
+                val p = if (tool == "finger") 0.7f else pressure
+                if (!cancel) onSendTouch(x, y, "up", p, tilt, tool, buttons)
+            }
+            else -> {}
+        }
+    }
+
+    private fun scheduleLongPress() {
+        handler.removeCallbacks(longPressRunnable)
+        handler.postDelayed(longPressRunnable, 600)
+    }
+
+    private fun cancelLongPress() {
+        handler.removeCallbacks(longPressRunnable)
+    }
+
+    private fun distBetween(event: MotionEvent, a: Int, b: Int): Float {
+        val dx = event.getX(a) - event.getX(b)
+        val dy = event.getY(a) - event.getY(b)
+        return hypot(dx, dy)
     }
 }

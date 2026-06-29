@@ -46,6 +46,8 @@ import com.mirrorx.app.network.MirrorWebSocket
 import com.mirrorx.app.network.NetworkScanner
 import com.mirrorx.app.touch.TouchHandler
 import com.mirrorx.app.touch.TouchHandler.TouchMode
+import com.mirrorx.app.ui.components.HudOverlay
+import com.mirrorx.app.network.ServerHud
 import com.mirrorx.app.ui.theme.MirrorAccent
 import com.mirrorx.app.ui.theme.MirrorBorder
 import com.mirrorx.app.ui.theme.MirrorGreen
@@ -112,11 +114,15 @@ fun MirrorScreen() {
     val serverCursorVisible by ws.cursorVisible.collectAsState()
     // v1.2.2: server-driven adaptation info for the "Adapt." badge
     val serverAdapt by ws.serverAdapt.collectAsState()
+    // v2.0.0: HUD de telemetria do servidor (codec/bitrate/fps/RTT)
+    val hud by ws.hud.collectAsState()
     // v1.7.0: multi-monitor support
     val monitors by ws.monitors.collectAsState()
     val currentMonitorIdx by ws.currentMonitorIdx.collectAsState()
     // v1.8: cursor in monitor bounds
     val cursorInBounds by ws.cursorInBounds.collectAsState()
+    // v2.0.0: bandwidth savings from dirty region renderer
+    val bandwidthSavings by ws.bandwidthSavings.collectAsState()
 
     // v1.8.1: persist last-used IP via SharedPreferences instead of hardcoded default
         val context = LocalContext.current
@@ -143,6 +149,8 @@ fun MirrorScreen() {
     var touchModeName by rememberSaveable { mutableStateOf(TouchMode.CURSOR.name) }
     // v1.2.3: default cursor = MICRO (user requested nearly invisible)
     var cursorSizeName by rememberSaveable { mutableStateOf(CursorSize.MICRO.name) }
+    // v2.0.0: toggle do HUD de telemetria
+    var showHud by rememberSaveable { mutableStateOf(true) }
 
     val touchMode = remember(touchModeName) {
         runCatching { TouchMode.valueOf(touchModeName) }.getOrDefault(TouchMode.OFF)
@@ -314,6 +322,12 @@ fun MirrorScreen() {
                 onAnyInteraction = { lastInteractionMs = System.currentTimeMillis() },
                 // v1.9.6: passa a altura da barra para position-based filtering
                 barHeightPx = barHeightPx,
+                // v2.0.0: HUD
+                showHud = showHud,
+                hud = hud,
+                fps = fps,
+                // v2.0.0: bandwidth savings from dirty region renderer
+                bandwidthSavings = bandwidthSavings,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -341,7 +355,8 @@ fun MirrorScreen() {
                             TouchMode.OFF -> TouchMode.CURSOR
                             TouchMode.CURSOR -> TouchMode.CLICK_ONLY
                             TouchMode.CLICK_ONLY -> TouchMode.DRAW
-                            TouchMode.DRAW -> TouchMode.OFF
+                            TouchMode.DRAW -> TouchMode.PEN
+                            TouchMode.PEN -> TouchMode.OFF
                             TouchMode.HERMES -> TouchMode.OFF
                         }
                         touchModeName = next.name
@@ -409,7 +424,8 @@ fun MirrorScreen() {
                             TouchMode.OFF -> TouchMode.CURSOR
                             TouchMode.CURSOR -> TouchMode.CLICK_ONLY
                             TouchMode.CLICK_ONLY -> TouchMode.DRAW
-                            TouchMode.DRAW -> TouchMode.OFF
+                            TouchMode.DRAW -> TouchMode.PEN
+                            TouchMode.PEN -> TouchMode.OFF
                             TouchMode.HERMES -> TouchMode.OFF
                         }
                         touchModeName = next.name
@@ -439,6 +455,12 @@ fun MirrorScreen() {
                 onAnyInteraction = { lastInteractionMs = System.currentTimeMillis() },
                 // v1.9.6: modo normal = Column, MirrorContent fica ABAIXO da barra estruturalmente
                 barHeightPx = 0,
+                // v2.0.0: HUD
+                showHud = showHud,
+                hud = hud,
+                fps = fps,
+                // v2.0.0: bandwidth savings from dirty region renderer
+                bandwidthSavings = bandwidthSavings,
                 modifier = Modifier.fillMaxSize().weight(1f)
             )
         }
@@ -572,8 +594,14 @@ private fun MirrorContent(
     onAnyInteraction: () -> Unit,
     // v1.9.6: altura da ConnectionBar em pixels para filtrar toques no overlap (modo monitor)
     barHeightPx: Int = 0,
-        modifier: Modifier = Modifier
-    ) {
+    // v2.0.0: HUD de telemetria
+    showHud: Boolean = true,
+    hud: ServerHud? = null,
+    fps: Int = 0,
+    // v2.0.0: bandwidth savings from dirty region renderer
+    bandwidthSavings: Int = 0,
+    modifier: Modifier = Modifier
+) {
         Box(
         modifier = modifier.background(Color.Black),
         contentAlignment = Alignment.Center
@@ -596,6 +624,16 @@ private fun MirrorContent(
                     contentDescription = "PC Screen",
                     modifier = Modifier.fillMaxSize()
                 )
+                // v2.0.0: HUD de telemetria sobreposto (codec, fps, bitrate, RTT)
+                if (showHud) {
+                    HudOverlay(
+                        hud = hud,
+                        fps = fps,
+                        bandwidthSavings = bandwidthSavings,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                    )
+                }
                 // v1.2 — cursor is its own composable so mousePos updates
                 // do NOT recompose the whole MirrorContent tree.
                 // The Canvas redraws on a sub-frame basis via the snapshot
@@ -1069,6 +1107,7 @@ private fun TouchBadge(
             TouchMode.CURSOR -> "Cursor"
             TouchMode.CLICK_ONLY -> "Caneta"
             TouchMode.DRAW -> "Desenhar"
+            TouchMode.PEN -> "Caneta Stylus"
             TouchMode.HERMES -> "Hermes"
         }
     }
@@ -1091,6 +1130,7 @@ private fun TouchBadge(
         ) {
             Icon(
                 imageVector = if (mode == TouchMode.DRAW) Icons.Default.Edit
+                              else if (mode == TouchMode.PEN) Icons.Default.Create
                               else if (mode == TouchMode.CLICK_ONLY) Icons.Default.Phone
                               else Icons.Default.Build,
                 contentDescription = null,

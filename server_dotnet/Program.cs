@@ -39,7 +39,26 @@ class Program
         set => _scaleFactor = Math.Clamp(value, 0.25, 1.0);
     }
 
-    static readonly List<IWebSocketConnection> clients = new();
+    // v1.9.8 new variables
+    public static double MouseSensitivity = 1.5;
+    public static bool InvertScroll = false;
+
+    public class ClientSession
+    {
+        public IWebSocketConnection Connection { get; set; }
+        public string IpAddress { get; set; }
+        public DateTime ConnectedAt { get; set; }
+        public int LatencyMs { get; set; } = -1;
+        public string Status { get; set; } = "Ativo";
+        public DateTime LastPingSentAt { get; set; }
+    }
+
+    public static readonly List<ClientSession> sessions = new();
+    static readonly MemoryStream frameMs = new MemoryStream(1024 * 1024);
+    static int currentFps = 0;
+    static int fpsCounter = 0;
+    static DateTime lastFpsMeasure = DateTime.Now;
+
     static Rectangle monitorBounds;
 
     static ServerForm gui;
@@ -141,7 +160,7 @@ class Program
         // v1.8.6: GUI + servidor em threads separadas
         gui = new ServerForm();
         gui.Show();
-        gui.Log("Iniciando MirrorX Server v1.9.7...");
+        gui.Log("Iniciando MirrorX Server v1.9.9...");
 
         // Inicia o servidor numa thread dedicada (MTA para DXGI)
         var serverThread = new Thread(() => RunServer(gui)) {
@@ -199,6 +218,12 @@ class Program
                 return;
             }
 
+            // Start Ping Sender loop
+            StartPingLoop(form);
+            
+            // Start Auto-FPS loop
+            StartAutoFpsLoop(form);
+
             // Inicia os WebSocket servers (1 por porta)
             var servers = new List<WebSocketServer>();
             foreach (var p in PORTS) {
@@ -206,20 +231,25 @@ class Program
                     var s = new WebSocketServer($"ws://0.0.0.0:{p}");
                     s.Start(socket => {
                         socket.OnOpen = () => {
-                            lock (clients) clients.Add(socket);
-                            string ip = socket.ConnectionInfo.ClientIpAddress;
-                            form.AddClient(ip);
-                            form.UpdateClientCount(clients.Count);
-                            form.Log($"[+ Conectado] {ip} na porta {p}");
+                            var session = new ClientSession {
+                                Connection = socket,
+                                IpAddress = socket.ConnectionInfo.ClientIpAddress,
+                                ConnectedAt = DateTime.Now,
+                                LastPingSentAt = DateTime.Now
+                            };
+                            lock (sessions) sessions.Add(session);
+                            form.AddClient(session.IpAddress, session.ConnectedAt.ToString("HH:mm:ss"), "Calculando...", "Ativo");
+                            form.UpdateClientCount(sessions.Count);
+                            form.Log($"[+ Conectado] {session.IpAddress} na porta {p}");
                         };
                         socket.OnClose = () => {
-                            lock (clients) clients.Remove(socket);
                             string ip = socket.ConnectionInfo.ClientIpAddress;
+                            lock (sessions) sessions.RemoveAll(x => x.Connection == socket);
                             form.RemoveClient(ip);
-                            form.UpdateClientCount(clients.Count);
+                            form.UpdateClientCount(sessions.Count);
                             form.Log($"[- Desconectado] {ip}");
                         };
-                        socket.OnMessage = HandleTouch;
+                        socket.OnMessage = msg => HandleTouch(msg, socket);
                     });
                     servers.Add(s);
                     form.Log($"Escutando em ws://{localIp}:{p}");
@@ -246,10 +276,15 @@ class Program
 
             while (!form.StopRequested)
             {
+                if (sessions.Count == 0)
+                {
+                    Thread.Sleep(100);
+                    continue;
+                }
+
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
-                    // v1.9.0: reload encoder params if quality changed at runtime
                     if (_jpegQuality != lastQuality)
                     {
                         lastQuality = _jpegQuality;
@@ -259,7 +294,6 @@ class Program
                     using var bmp = dup.CaptureFrame();
                     if (bmp != null)
                     {
-                        // v1.9.0: uses runtime _scaleFactor instead of const
                         Bitmap? resized = null;
                         Bitmap frameToEncode = bmp;
                         try
@@ -272,39 +306,58 @@ class Program
                                 frameToEncode = resized;
                             }
                         }
-                        catch { resized?.Dispose(); frameToEncode = bmp; }  // fallback: usa original se resize falhar
+                        catch { resized?.Dispose(); frameToEncode = bmp; }
 
-                        using var ms = new MemoryStream();
-                        frameToEncode.Save(ms, jpeg, encParams);
-                        var jpegBytes = ms.ToArray();
-                        resized?.Dispose();  // libera o bitmap redimensionado apos encodar
+                        lock (frameMs)
+                        {
+                            frameMs.SetLength(0);
+                            frameMs.Position = 0;
+                            frameToEncode.Save(frameMs, jpeg, encParams);
+                            byte[] buffer = frameMs.GetBuffer();
+                            int length = (int)frameMs.Length;
+                            resized?.Dispose();
 
-                        // 11-byte header (11 bytes) que o APK espera
-                        byte[] header = new byte[11];
-                        header[0] = 0x01;
-                        header[1] = (byte)((jpegBytes.Length >> 24) & 0xFF);
-                        header[2] = (byte)((jpegBytes.Length >> 16) & 0xFF);
-                        header[3] = (byte)((jpegBytes.Length >> 8) & 0xFF);
-                        header[4] = (byte)(jpegBytes.Length & 0xFF);
-                        header[5] = (byte)((dup.CursorX >> 8) & 0xFF);
-                        header[6] = (byte)(dup.CursorX & 0xFF);
-                        header[7] = (byte)((dup.CursorY >> 8) & 0xFF);
-                        header[8] = (byte)(dup.CursorY & 0xFF);
-                        header[9] = (byte)(dup.CursorVisible ? 1 : 0);
-                        header[10] = 0;
+                            var frame = new byte[11 + length];
+                            frame[0] = 0x01;
+                            frame[1] = (byte)((length >> 24) & 0xFF);
+                            frame[2] = (byte)((length >> 16) & 0xFF);
+                            frame[3] = (byte)((length >> 8) & 0xFF);
+                            frame[4] = (byte)(length & 0xFF);
+                            frame[5] = (byte)((dup.CursorX >> 8) & 0xFF);
+                            frame[6] = (byte)(dup.CursorX & 0xFF);
+                            frame[7] = (byte)((dup.CursorY >> 8) & 0xFF);
+                            frame[8] = (byte)(dup.CursorY & 0xFF);
+                            frame[9] = (byte)(dup.CursorVisible ? 1 : 0);
+                            frame[10] = 0;
+                            
+                            Buffer.BlockCopy(buffer, 0, frame, 11, length);
 
-                        var frame = new byte[header.Length + jpegBytes.Length];
-                        Buffer.BlockCopy(header, 0, frame, 0, header.Length);
-                        Buffer.BlockCopy(jpegBytes, 0, frame, header.Length, jpegBytes.Length);
-
-                        // Broadcast pros clientes (snapshot + send fora do lock)
-                        List<IWebSocketConnection> snapshot;
-                        lock (clients) snapshot = new List<IWebSocketConnection>(clients);
-                        foreach (var c in snapshot)
-                            try { if (c.IsAvailable) c.Send(frame); } catch { }
+                            List<IWebSocketConnection> snapshot;
+                            lock (sessions) snapshot = sessions.Select(x => x.Connection).ToList();
+                            
+                            bool sent = false;
+                            foreach (var c in snapshot) {
+                                try {
+                                    if (c.IsAvailable) {
+                                        c.Send(frame);
+                                        sent = true;
+                                    }
+                                } catch { }
+                            }
+                            
+                            if (sent) {
+                                fpsCounter++;
+                            }
+                        }
+                        
+                        if ((DateTime.Now - lastFpsMeasure).TotalSeconds >= 1.0) {
+                            currentFps = fpsCounter;
+                            fpsCounter = 0;
+                            lastFpsMeasure = DateTime.Now;
+                        }
                     }
                 }
-                catch (Exception ex) { /* silencioso \u2014 pula frame com erro transiente */ }
+                catch { }
                 int rest = frameDelay - (int)sw.ElapsedMilliseconds;
                 if (rest > 0) Thread.Sleep(rest);
             }
@@ -331,17 +384,30 @@ class Program
         }
     }
 
-    // v1.9.0: enhanced HandleTouch \u2014 supports both legacy and hermes JSON packet formats
-    // Legacy: {type:"down"|"up", x, y}
-    // Hermes: {t:"s", v:N} scroll, {t:"m", x, y} move, {t:"c", b:N} click
-    static void HandleTouch(string json)
+    // v1.9.0: enhanced HandleTouch — supports both legacy and hermes JSON packet formats
+    // Legacy: {type:"down"|"up"|"click"|"scroll", x, y, buttons}
+    // Hermes: {t:"s", v:N} scroll, {t:"m", x, y} move, {t:"c", b:N} click, {t:"d"|"u", b:N} down/up
+    static void HandleTouch(string json, IWebSocketConnection socket)
     {
         try
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            // Hermes compact format: {t: "s"|"m"|"c", ...}
+            // Pong handling
+            if (root.TryGetProperty("type", out var typeP) && typeP.GetString() == "pong") {
+                string ip = socket.ConnectionInfo.ClientIpAddress;
+                lock (sessions) {
+                    var s = sessions.FirstOrDefault(x => x.Connection == socket);
+                    if (s != null) {
+                        s.LatencyMs = (int)(DateTime.Now - s.LastPingSentAt).TotalMilliseconds;
+                        gui.UpdateClientPing(ip, s.LatencyMs);
+                    }
+                }
+                return;
+            }
+
+            // Hermes compact format: {t: "s"|"m"|"c"|"d"|"u", ...}
             if (root.TryGetProperty("t", out var tProp))
             {
                 string t = tProp.GetString() ?? "";
@@ -355,7 +421,7 @@ class Program
                         }
                         break;
 
-                    case "m": // v1.9.1: relative delta mouse move (Full-Screen Touchpad)
+                    case "m": // relative delta mouse move
                         if (root.TryGetProperty("x", out var mxProp) && root.TryGetProperty("y", out var myProp))
                         {
                             int dx = mxProp.GetInt32();
@@ -364,7 +430,7 @@ class Program
                         }
                         break;
 
-                    case "c": // v1.9.7: mouse click — b: 0=left, 1=right, 2=middle
+                    case "c": // mouse click — b: 0=left, 1=right, 2=middle
                         if (root.TryGetProperty("b", out var bProp))
                         {
                             int button = bProp.GetInt32();
@@ -376,11 +442,29 @@ class Program
                             }
                         }
                         break;
+
+                    case "d": // mouse down — b: 0=left, 1=right
+                        if (root.TryGetProperty("b", out var bdProp))
+                        {
+                            int button = bdProp.GetInt32();
+                            if (button == 0) Send(new MOUSEINPUT { dwFlags = LDOWN });
+                            else if (button == 1) Send(new MOUSEINPUT { dwFlags = RDOWN });
+                        }
+                        break;
+
+                    case "u": // mouse up — b: 0=left, 1=right
+                        if (root.TryGetProperty("b", out var buProp))
+                        {
+                            int button = buProp.GetInt32();
+                            if (button == 0) Send(new MOUSEINPUT { dwFlags = LUP });
+                            else if (button == 1) Send(new MOUSEINPUT { dwFlags = RUP });
+                        }
+                        break;
                 }
                 return;
             }
 
-            // Legacy format: {type: "down"|"up", x, y}
+            // Legacy format: {type: "down"|"up"|"click"|"scroll", x, y, buttons}
             if (root.TryGetProperty("type", out var typeProp))
             {
                 string type = typeProp.GetString() ?? "";
@@ -388,17 +472,37 @@ class Program
                 double y = root.TryGetProperty("y", out var yP) ? yP.GetDouble() : 0;
                 int px = monitorBounds.Left + (int)(x * monitorBounds.Width);
                 int py = monitorBounds.Top + (int)(y * monitorBounds.Height);
-                MoveMouseAbsolute(px, py);
-                if (type == "down") MouseButton(true);
-                else if (type == "up") MouseButton(false);
-                // v1.9.0: handle legacy scroll {type:"scroll", v:N}
-                else if (type == "scroll" && root.TryGetProperty("v", out var sv))
+                
+                if (type == "scroll" && root.TryGetProperty("v", out var sv))
                 {
                     MouseScroll(sv.GetInt32());
+                    return;
+                }
+
+                MoveMouseAbsolute(px, py);
+
+                bool isRightClick = false;
+                if (root.TryGetProperty("button", out var btnProp) && btnProp.GetString() == "right") {
+                    isRightClick = true;
+                } else if (root.TryGetProperty("buttons", out var btnsProp) && (btnsProp.GetInt32() & 2) != 0) {
+                    isRightClick = true;
+                }
+
+                if (type == "down") {
+                    if (isRightClick) Send(new MOUSEINPUT { dwFlags = RDOWN });
+                    else MouseButton(true);
+                }
+                else if (type == "up") {
+                    if (isRightClick) Send(new MOUSEINPUT { dwFlags = RUP });
+                    else MouseButton(false);
+                }
+                else if (type == "click") {
+                    if (isRightClick) MouseClick(RDOWN, RUP);
+                    else MouseClick(LDOWN, LUP);
                 }
             }
         }
-        catch (Exception e) { /* silencioso */ }
+        catch { }
     }
 
     // ---------- Win32 SendInput ----------
@@ -428,7 +532,9 @@ class Program
     // v1.9.1: relative delta move for Full-Screen Touchpad (MOUSEEVENTF_MOVE without ABSOLUTE)
     static void MoveMouseRelative(int dx, int dy)
     {
-        Send(new MOUSEINPUT { dx = dx, dy = dy, dwFlags = MOVE });
+        int sdx = (int)Math.Round(dx * MouseSensitivity);
+        int sdy = (int)Math.Round(dy * MouseSensitivity);
+        Send(new MOUSEINPUT { dx = sdx, dy = sdy, dwFlags = MOVE });
     }
 
     static void MouseButton(bool down) => Send(new MOUSEINPUT { dwFlags = down ? LDOWN : LUP });
@@ -442,8 +548,11 @@ class Program
     }
 
     // v1.9.0: scroll wheel \u2014 mouseData is the scroll amount (positive=up, negative=down)
-    static void MouseScroll(int delta) =>
-        Send(new MOUSEINPUT { dwFlags = WHEEL, mouseData = (uint)delta });
+    static void MouseScroll(int delta)
+    {
+        int finalDelta = InvertScroll ? -delta : delta;
+        Send(new MOUSEINPUT { dwFlags = WHEEL, mouseData = (uint)finalDelta });
+    }
 
     static void Send(MOUSEINPUT mi) =>
         SendInput(1, new[] { new INPUT { type = 0, U = new InputUnion { mi = mi } } }, Marshal.SizeOf<INPUT>());
@@ -456,4 +565,59 @@ class Program
 
     [StructLayout(LayoutKind.Sequential)]
     struct INPUT { public uint type; public InputUnion U; }
+    static void StartPingLoop(ServerForm form)
+    {
+        Task.Run(async () => {
+            while (!form.StopRequested) {
+                await Task.Delay(3000);
+                List<ClientSession> active;
+                lock (sessions) active = new List<ClientSession>(sessions);
+                foreach (var s in active) {
+                    try {
+                        s.LastPingSentAt = DateTime.Now;
+                        s.Connection.Send(JsonSerializer.Serialize(new { type = "ping" }));
+                    } catch { }
+                }
+            }
+        });
+    }
+
+    static void StartAutoFpsLoop(ServerForm form)
+    {
+        Task.Run(async () => {
+            while (!form.StopRequested) {
+                await Task.Delay(2000);
+                if (form.AutoFpsEnabled) {
+                    int targetFps = form.TargetFps;
+                    double avgLatency = 0;
+                    int activeCount = 0;
+                    lock (sessions) {
+                        foreach (var s in sessions) {
+                            if (s.LatencyMs >= 0) {
+                                avgLatency += s.LatencyMs;
+                                activeCount++;
+                            }
+                        }
+                    }
+                    if (activeCount > 0) avgLatency /= activeCount;
+                    else avgLatency = 10;
+
+                    if (currentFps < targetFps) {
+                        if (JpegQuality > 15) {
+                            JpegQuality = Math.Max(15, JpegQuality - 5);
+                            form.SetQualitySliderValue((int)JpegQuality);
+                        } else if (ScaleFactor > 0.75) {
+                            ScaleFactor = 0.75;
+                            form.SetScaleSliderValue(75);
+                        }
+                    } else if (currentFps >= targetFps && avgLatency < 15) {
+                        if (JpegQuality < 80) {
+                            JpegQuality = Math.Min(80, JpegQuality + 2);
+                            form.SetQualitySliderValue((int)JpegQuality);
+                        }
+                    }
+                }
+            }
+        });
+    }
 }

@@ -74,6 +74,10 @@ fun TouchpadView(
     var dragStartMs by remember { mutableLongStateOf(0L) }
     var dragTotalPx by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
+    var lastTapTime by remember { mutableLongStateOf(0L) }
+    var lastTapX by remember { mutableFloatStateOf(0f) }
+    var lastTapY by remember { mutableFloatStateOf(0f) }
+    var doubleTapHoldActive by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -140,27 +144,42 @@ fun TouchpadView(
                 .padding(top = 40.dp, bottom = 120.dp)
                 .pointerInput(localSensitivity, sendIntervalMs) {
                     awaitEachGesture {
-                        // Wait for first finger down
                         val firstDown = awaitFirstDown(requireUnconsumed = false)
-                        dragStartMs = SystemClock.uptimeMillis()
+                        val startTime = SystemClock.uptimeMillis()
+                        val startX = firstDown.position.x
+                        val startY = firstDown.position.y
+                        dragStartMs = startTime
                         dragTotalPx = 0f
                         accDx = 0f; accDy = 0f
-                        lastSendMs = dragStartMs
+                        lastSendMs = startTime
                         isDragging = false
 
                         var scrollMode = false
-                        var maxFingerCount = 1  // v1.9.7: track for 2-finger tap detection
+                        var maxFingers = 1
+                        var isLongClickTriggered = false
 
-                        // Track all subsequent pointer events until all fingers lift
+                        val elapsedSinceLastTap = startTime - lastTapTime
+                        val distFromLastTap = kotlin.math.hypot(startX - lastTapX, startY - lastTapY)
+                        val isDoubleTapCandidate = elapsedSinceLastTap < 220L && distFromLastTap < 50f
+
+                        if (isDoubleTapCandidate) {
+                            doubleTapHoldActive = true
+                            client.sendHermesMouseDown(0)
+                        }
+
                         do {
                             val event = awaitPointerEvent()
                             val fingerCount = event.changes.count { it.pressed }
-                            if (fingerCount > maxFingerCount) maxFingerCount = fingerCount
+                            maxFingers = maxOf(maxFingers, fingerCount)
+
+                            val elapsed = SystemClock.uptimeMillis() - startTime
+                            if (maxFingers == 1 && !isDragging && !doubleTapHoldActive && elapsed > 500L && !isLongClickTriggered) {
+                                isLongClickTriggered = true
+                            }
 
                             if (event.type == PointerEventType.Move) {
                                 val changes = event.changes
                                 if (fingerCount >= 2) {
-                                    // 2-finger drag = vertical scroll
                                     scrollMode = true
                                     val avg2Y = changes.filter { it.pressed }.map { it.position.y }.average().toFloat()
                                     val prevAvg2Y = changes.filter { it.pressed }.map { it.previousPosition.y }.average().toFloat()
@@ -169,12 +188,11 @@ fun TouchpadView(
                                     if (notches != 0) client.sendHermesScroll(notches)
                                     changes.forEach { it.consume() }
                                 } else if (fingerCount == 1 && !scrollMode) {
-                                    // 1-finger drag = mouse move (relative delta)
                                     val change = changes.firstOrNull { it.pressed } ?: continue
                                     val rawDx = change.position.x - change.previousPosition.x
                                     val rawDy = change.position.y - change.previousPosition.y
                                     dragTotalPx += abs(rawDx) + abs(rawDy)
-                                    isDragging = dragTotalPx > 5f
+                                    isDragging = dragTotalPx > 8f
 
                                     val scaledDx = rawDx * localSensitivity
                                     val scaledDy = rawDy * localSensitivity
@@ -194,18 +212,29 @@ fun TouchpadView(
                             }
                         } while (event.changes.any { it.pressed })
 
-                        // On release: flush remaining accumulator
                         val sdx = accDx.toInt(); val sdy = accDy.toInt()
                         if (sdx != 0 || sdy != 0) client.sendHermesMove(sdx, sdy)
                         accDx = 0f; accDy = 0f
 
-                        // v1.9.7: Tap detection with right-click support
-                        val held = SystemClock.uptimeMillis() - dragStartMs
-                        if (!scrollMode && !isDragging) {
-                            when {
-                                maxFingerCount >= 2 && held < 400L -> client.sendHermesClick(1)  // 2-finger tap = right click
-                                held >= 500L -> client.sendHermesClick(1)  // long press = right click
-                                held < 280L -> client.sendHermesClick(0)  // 1-finger tap = left click
+                        val endTime = SystemClock.uptimeMillis()
+                        val heldTime = endTime - startTime
+
+                        if (doubleTapHoldActive) {
+                            client.sendHermesMouseUp(0)
+                            doubleTapHoldActive = false
+                            lastTapTime = 0L
+                        } else {
+                            if (maxFingers == 2 && heldTime < 250L && !isDragging) {
+                                client.sendHermesClick(1)
+                            } else if (maxFingers == 1 && !isDragging) {
+                                if (heldTime in 50L..200L) {
+                                    client.sendHermesClick(0)
+                                    lastTapTime = endTime
+                                    lastTapX = startX
+                                    lastTapY = startY
+                                } else if (heldTime >= 500L || isLongClickTriggered) {
+                                    client.sendHermesClick(1)
+                                }
                             }
                         }
                         isDragging = false; scrollMode = false
@@ -252,17 +281,46 @@ fun TouchpadView(
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
         ) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
-                // Row 1: Click buttons + scroll buttons
+                // Row 1: Notebook Physical Trackpad Simulation
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircleBtn("L", Color(0xFF10B981), 48.dp) { client.sendHermesClick(0) }
-                    CircleBtn("R", Color(0xFFF59E0B), 48.dp) { client.sendHermesClick(1) }
-                    CircleBtn("↑", Color(0xFF6366F1), 38.dp) { client.sendHermesScroll(-3) }
-                    CircleBtn("↓", Color(0xFF6366F1), 38.dp) { client.sendHermesScroll(3) }
-                    Spacer(Modifier.weight(1f))
+                    // Left Button
+                    Surface(
+                        color = Color(0xFF1E1E2C),
+                        shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .pointerInput(Unit) {
+                                detectTapGestures(onTap = { client.sendHermesClick(0) })
+                            }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("CLIQUE L (Esquerdo)", color = Color(0xFF10B981), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                    // Right Button
+                    Surface(
+                        color = Color(0xFF252538),
+                        shape = RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .pointerInput(Unit) {
+                                detectTapGestures(onTap = { client.sendHermesClick(1) })
+                            }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("CLIQUE R (Direito)", color = Color(0xFFF59E0B), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
                     Text("FPS: $actualFps", color = Color(0xFF6E6E80), fontSize = 9.sp)
                 }
 
