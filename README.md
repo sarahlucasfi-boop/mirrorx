@@ -2,6 +2,10 @@
 
 **Transforme qualquer tablet Android em uma segunda tela sem fio para Windows.**
 
+https://drive.google.com/file/d/1PnCZ0gTpx-9SzCtseZZq1te5kG_ODnMf/view?usp=sharing
+https://drive.google.com/file/d/1rypCDRu5MTNv3sWABFL7iNWZi2VyagbA/view?usp=sharing
+https://drive.google.com/file/d/1oCrzHV3blZ1eopYrR0tdihrdIwnBA3Ne/view?usp=sharing
+
 Sem cabos. Conexão direta via WiFi na rede local. Código aberto. 100% gratuito.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
