@@ -1,18 +1,29 @@
-# MirrorX v2.0.2
+# MirrorX v2.0.5A
 
 **Transforme qualquer tablet Android em uma segunda tela sem fio para Windows.**
 
+📦 **Download direto:** [GitHub Releases v2.0.5A](https://github.com/sarahlucasfi-boop/mirrorx/releases/tag/v2.0.5A)
+📁 **Link alternativo (Google Drive):**
 https://drive.google.com/file/d/1PnCZ0gTpx-9SzCtseZZq1te5kG_ODnMf/view?usp=sharing
 https://drive.google.com/file/d/1rypCDRu5MTNv3sWABFL7iNWZi2VyagbA/view?usp=sharing
 https://drive.google.com/file/d/1oCrzHV3blZ1eopYrR0tdihrdIwnBA3Ne/view?usp=sharing
 
 Sem cabos. Conexão direta via WiFi na rede local. Código aberto. 100% gratuito.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-blue)](https://github.com)
 [![Android](https://img.shields.io/badge/Android-8%2B-green)](https://github.com)
-[![Version](https://img.shields.io/badge/version-2.0.2-6366f1)](https://github.com)
+[![Version](https://img.shields.io/badge/version-2.0.5A-6366f1)](https://github.com)
 [![100% Free](https://img.shields.io/badge/100%25-Free-brightgreen)](https://github.com)
+
+---
+
+## 🆕 Novidades da v2.0.5A
+
+- 🔵 **HUD azul removido** — sem overlay de informações no meio da tela
+- 🔍 **Zoom com 2 dedos** — arraste dois dedos para dar zoom, duplo-tap reseta
+- 🖱️ **Touch input normal** — toques funcionam mesmo com zoom ativo
+- 🐛 **Correções de bugs** — renderização de vídeo e partial updates do servidor
 
 ---
 
@@ -37,7 +48,7 @@ Sem cabos. Conexão direta via WiFi na rede local. Código aberto. 100% gratuito
 
 ### 1. Servidor no PC
 
-Baixe `MirrorXServer.exe` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases) e execute.
+Baixe `MirrorX_v2.0.5A.exe` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases/tag/v2.0.5A) e execute.
 
 Não precisa instalar nada — o exe já tem tudo embutido.
 
@@ -50,7 +61,7 @@ New-NetFirewallRule -DisplayName "MirrorX" -Direction Inbound -Protocol TCP -Loc
 
 ### 2. APK no Tablet
 
-Baixe `MirrorX_v2.0.2.apk` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases), instale no tablet e abra.
+Baixe `MirrorX_v2.0.5A.apk` do [Releases](https://github.com/sarahlucasfi-boop/mirrorx/releases/tag/v2.0.5A), instale no tablet e abra.
 
 Digite o IP do PC e conecte.
 
@@ -107,4 +118,4 @@ cd android_source
 
 ## Licença
 
-MIT — livre para uso pessoal e comercial.
+GPLv3 — livre para uso pessoal e comercial. 100% gratuito, sem restrições.
